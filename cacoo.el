@@ -92,7 +92,7 @@
                 (y-or-n-p 
                  (format "Image directory [%s] not found. Create it ?" 
                          cacoo:img-dir)))
-        (mkdir img-dir))
+        (make-directory img-dir))
       (unless (file-directory-p img-dir)
         (error "Could not create a image directory.")))
     img-dir))
