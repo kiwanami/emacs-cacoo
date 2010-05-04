@@ -146,9 +146,13 @@
       t))))
 
 (defun cacoo:get-local-path-from-url(url)
-  (if (string-match "^file://\\(.*\\)$" url) ; フルパスを仮定
-      (match-string 1 url)
-    (error "Wrong URL pattern [%s]" url)))
+  (cond
+   ((string-match "^file://\\(.*\\)$" url) ; フルパスを仮定
+    (match-string 1 url))
+   ((cacoo:file-exists-p (expand-file-name url default-directory))
+    (expand-file-name url default-directory))
+   (t
+    (error "Wrong URL pattern [%s]" url))))
 
 (defun cacoo:load-diagram-local(url pos-start pos-end &optional force-reload)
   (let* ((save-dir (cacoo:fix-directory))
@@ -263,9 +267,10 @@
         ((string-match "^https?:\\/\\/" url)
          (cacoo:load-diagram-remote url pos-start pos-end force-reload)
          pos-end)
-        (t
-         (message (format "Invalid URL [%s]" line))
-         nil))))))
+        (t ; 相対パスを仮定
+         (cacoo:load-diagram-local
+          url pos-start pos-end force-reload)
+         pos-end))))))
 
 (defun cacoo:revert-next-diagram ()
   (cacoo:do-next-diagram
