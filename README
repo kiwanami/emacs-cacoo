@@ -1,0 +1,93 @@
+Cacoo Mode
+========================================
+
+Cacooで書いた画像をインラインで表示したり、編集画面をさっと開くことのできるマイナーモードです。画像はローカルにキャッシュしていますので、オフラインでも画像を見ることができます。インライン表示時には自動的に指定のサイズに縮小します。
+
+実際にはCacooだけではなく、URLで参照できてEmacsとImageMagickが解釈できる図であれば大抵インライン表示できます。
+
+良く似たものにiimage（Emacs標準添付）があります。iimageはローカルのファイルを表示するのみですが、それをWebから取得可能にしたり、自動で縮小したり、その他Cacooの編集機能をつけたようなものです。
+
+インストール
+----------------------------------------
+
+必要なもの、環境
+ wget, ImageMagick(convert, identify, display)
+
+ロードパスに cacoo.el を置き、以下のように呼び出し用のコードを .emacs などに追加してください。以下の例では、Altキーを押しながら「-」を押すとOn/Offが切り替わるようになります。
+
+ ;設定例
+ (require 'cacoo)
+ (global-set-key (kbd "M--") 'toggle-cacoo-minor-mode)
+
+
+使い方
+----------------------------------------
+
+テキスト中に以下のように記述するとCacooの絵が入ります。
+
+[img:https://cacoo.com/diagrams/6m4ATG1ddlUiHPqd-0FAF7.png]
+
+cacoo-minor-modeがOnの時に以下のキーバインドが使えます。
+（cacoo-minor-mode-keymapをカスタマイズしてみてください）
+
+* バッファ全体に対して
+C-c T : バッファのすべての図をテキストに戻す
+C-c D : バッファのすべての図を表示する（キャッシュがあればネットワークに接続しない）
+C-c R : バッファのすべての図を取得し直す
+
+* カーソール直後の図に対して
+C-c t : テキストに戻す
+C-c d : 図を表示する（キャッシュがあればネットワークに接続しない）
+C-c r : 図を取得し直して表示する
+C-c e : 図の編集画面を表示する（https://cacoo.com/diagrams/xxxxx/edit）
+C-c v : 図の生涯画面を表示する（https://cacoo.com/diagrams/xxxxx）
+C-c V : ローカルの図を外部ビューアーで開く
+
+* Cacooの機能に対して
+C-c N : 新規図の作成 （https://cacoo.com/diagrams/new）
+C-c l : 図の一覧 （https://cacoo.com/diagrams/）
+
+* ナビゲーション、編集
+C-c n : 次の図に移動
+C-c p : 前の図に移動
+C-c i : 図のマークアップを挿入
+C-c y : クリップボードのテキストを使って図のマークアップを挿入
+
+* その他
+C-c C : キャッシュディレクトリを空にする
+
+Cacoo以外でも以下のような図を表示することができます。
+（もちろん編集はできません）
+Web上の画像
+[img:http://example.com/zzz.png]
+ローカルの画像（絶対パス）
+[img:file:///xxx/yyy/zzz.png]
+ローカルの画像（相対パス）
+[img:zzz.png]
+
+カスタマイズなど
+----------------------------------------
+
+ブラウザーはEmacsで設定してあるデフォルトブラウザーを使います。browse-url-browser-function 周辺を設定してみてください。
+
+例：Macでsafariを使う場合
+ (setq browse-url-browser-function 'browse-url-generic)
+ (setq browse-url-generic-program "open")
+
+cacoo:img-regexp, cacoo:img-pattern を変更することで、Wiki記法などにあわせることができます。
+
+キャッシュ用のディレクトリ名は cacoo:img-dir で指定します。いちいちディレクトリ作成で確認が必要なければ、 cacoo:img-dir-ok を t に設定してください。
+
+画像の縮小サイズは cacoo:max-size で指定します。以下のように書くことで画像ごとにも指定できます。
+[img:file:///xxx/yyy/zzz.png 600]
+
+外部画像ビューアーのプログラムは cacoo:external-viewer で指定します。nilに設定するとEmacsで開こうとします。
+
+
+ライセンスなど
+----------------------------------------
+License
+  GPL v3
+
+Repository
+  http://github.com/kiwanami/emacs-cacoo

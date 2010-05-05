@@ -29,6 +29,9 @@
 
 ;;; Installation:
 
+;; 必要なもの、環境
+;; wget, ImageMagick(convert, identify, display)
+
 ;; ロードパスに cacoo.el を置き、以下のように呼び出し用のコードを
 ;; .emacs などに追加してください。以下の例では、Altキーを押しながら「-」
 ;; を押すとOn/Offが切り替わるようになります。
@@ -37,7 +40,74 @@
 ;; (require 'cacoo)
 ;; (global-set-key (kbd "M--") 'toggle-cacoo-minor-mode)
 
+;;; Usage:
+
+;; テキスト中に以下のように記述するとCacooの絵が入ります。
+;; [img:https://cacoo.com/diagrams/6m4ATG1ddlUiHPqd-0FAF7.png]
+;; 
+;; cacoo-minor-modeがOnの時に以下のキーバインドが使えます。
+;; （cacoo-minor-mode-keymapをカスタマイズしてみてください）
+
+;; * バッファ全体に対して
+;; C-c T : バッファのすべての図をテキストに戻す
+;; C-c D : バッファのすべての図を表示する（キャッシュがあればネットワークに接続しない）
+;; C-c R : バッファのすべての図を取得し直す
+
+;; * カーソール直後の図に対して
+;; C-c t : テキストに戻す
+;; C-c d : 図を表示する（キャッシュがあればネットワークに接続しない）
+;; C-c r : 図を取得し直して表示する
+;; C-c e : 図の編集画面を表示する（https://cacoo.com/diagrams/xxxxx/edit）
+;; C-c v : 図の生涯画面を表示する（https://cacoo.com/diagrams/xxxxx）
+;; C-c V : ローカルの図を外部ビューアーで開く
+
+;; * Cacooの機能に対して
+;; C-c N : 新規図の作成 （https://cacoo.com/diagrams/new）
+;; C-c l : 図の一覧 （https://cacoo.com/diagrams/）
+
+;; * ナビゲーション、編集
+;; C-c n : 次の図に移動
+;; C-c p : 前の図に移動
+;; C-c i : 図のマークアップを挿入
+;; C-c y : クリップボードのテキストを使って図のマークアップを挿入
+
+;; * その他
+;; C-c C : キャッシュディレクトリを空にする
+
+;; Cacoo以外でも以下のような図を表示することができます。
+;; （もちろん編集はできません）
+;; Web上の画像
+;; [img:http://example.com/zzz.png]
+;; ローカルの画像（絶対パス）
+;; [img:file:///xxx/yyy/zzz.png]
+;; ローカルの画像（相対パス）
+;; [img:zzz.png]
+
+;;; カスタマイズなど
+
+;; ブラウザーはEmacsで設定してあるデフォルトブラウザーを使います。
+;; browse-url-browser-function 周辺を設定してみてください。
+;; 例：Macでsafariを使う場合
+;; (setq browse-url-browser-function 'browse-url-generic)
+;; (setq browse-url-generic-program "open")
+
+;; cacoo:img-regexp, cacoo:img-pattern を変更することで、Wiki記法などに
+;; あわせることができます。
+
+;; キャッシュ用のディレクトリ名は cacoo:img-dir で指定します。いちいち
+;; ディレクトリ作成で確認が必要なければ、 cacoo:img-dir-ok を t に設定
+;; してください。
+
+;; 画像の縮小サイズは cacoo:max-size で指定します。
+;; 以下のように書くことで画像ごとにも指定できます。
+;; [img:file:///xxx/yyy/zzz.png 600]
+
+;; 外部画像ビューアーのプログラムは cacoo:external-viewer で指定します。
+;; nilに設定するとEmacsで開こうとします。
+
 ;;; Code:
+
+(eval-when-compile (require 'cl))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customize
@@ -49,14 +119,15 @@
 (defvar cacoo:list-url cacoo:base-url)
 
 (defvar cacoo:img-regexp "\\[img:\\([^]]*\\)\\]") ; 本文から画像に置き換える文字列を取ってくる正規表現
+(defvar cacoo:img-pattern "[img:%s]") ; 画像として挿入する文字列
 (defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)") ; URLからCacooの画像のKeyを取ってくる正規表現
 
 (defvar cacoo:img-dir ".cimg") ; 画像キャッシュフォルダ
 (defvar cacoo:img-dir-ok nil) ; 勝手にディレクトリを作って良ければ t
 
-(defvar cacoo:max-size 450) ; 縮小サイズ
+(defvar cacoo:max-size 450) ; デフォルトの縮小サイズ
 
-(setq cacoo:external-viewer "display") ; 画像
+(defvar cacoo:external-viewer "display") ; ローカルの画像ビューアー。nilだとEmacsで開く。
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Fundamental Functions
@@ -76,6 +147,17 @@
          (cdr i)))
      keymap-list)
     map))
+
+;; cacoo:$img 画像データの構造体
+;; url          : 画像を取ってくるURL
+;; line         : 画像表示指示テキスト全体
+;; cached-file  : コピーしたオリジナルの画像
+;; resized-file : サイズ調整した画像
+;; start        : テキスト置き換えの開始位置
+;; end          : テキスト置き換えの終了位置
+;; size         : この画像の表示サイズ
+;; error        : 何か問題が発生したときの表示内容
+(defstruct cacoo:$img url line cached-file resized-file start end size error)
 
 (defun cacoo:get-cache-dir() 
   (let* ((base-dir (file-name-directory 
@@ -97,6 +179,14 @@
         (error "Could not create a image directory.")))
     img-dir))
 
+(defun cacoo:get-cache-path (filename)
+  (expand-file-name 
+   filename (cacoo:get-cache-dir)))
+
+(defun cacoo:get-resize-path (filename)
+  (expand-file-name
+   (format "resize_%s" filename) (cacoo:get-cache-dir)))
+
 (defun cacoo:get-filename-from-url (url)
   (if (string-match "[^/]*$" url) ; URLがパラメーターの時は怪しい
       (match-string 0 url)
@@ -113,15 +203,14 @@
              (when (file-exists-p it)
                (delete-file it))))
 
-(defun cacoo:load-diagram-remote(url pos-start pos-end &optional force-reload)
-  (lexical-let* ((pos-start pos-start) (pos-end pos-end)
-                 (save-dir (cacoo:fix-directory))
-                 (org-path (expand-file-name (cacoo:get-filename-from-url url) save-dir))
+(defun cacoo:load-diagram-remote(data &optional force-reload)
+  (lexical-let* ((data data) (force-reload force-reload)
+                 (org-path (cacoo:$img-cached-file data))
                  proc tmpbuf)
     (when force-reload (cacoo:clear-cache-file org-path))
     (cond
      ((cacoo:file-exists-p org-path)
-      (cacoo:resize-diagram org-path pos-start pos-end)
+      (cacoo:resize-diagram data force-reload)
       t)
      (t
       (setq tmpbuf (get-buffer-create 
@@ -129,20 +218,23 @@
       (buffer-disable-undo tmpbuf)
       (setq proc (start-process
                   "Cacoo:wget" tmpbuf "wget"
-                  "-q" "-O" org-path url))
+                  "-q" "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
+                  "-O" org-path url))
       (set-process-sentinel
        proc (lambda(proc event)
               (cond 
                ((string-match "exited abnormally" event)
+                (setf (cacoo:$img-error data)
+                      (cacoo:buffer-string "No network connection. %s" tmpbuf))
                 (kill-buffer tmpbuf)
-                (cacoo:display-diagram-by-text pos-start pos-end
-                                               "No network connection."))
+                (cacoo:display-diagram-by-text data))
                ((equal event "finished\n")
                 (kill-buffer tmpbuf)
                 (if (cacoo:file-exists-p org-path)
-                    (cacoo:resize-diagram org-path pos-start pos-end)
-                  (cacoo:display-diagram-by-text 
-                   pos-start pos-end "No network connection.")))))) 
+                    (cacoo:resize-diagram data force-reload)
+                  (setf (cacoo:$img-error data)
+                        (cacoo:buffer-string "No network connection. %s" tmpbuf))
+                  (cacoo:display-diagram-by-text data))))))
       t))))
 
 (defun cacoo:get-local-path-from-url(url)
@@ -154,28 +246,23 @@
    (t
     (error "Wrong URL pattern [%s]" url))))
 
-(defun cacoo:load-diagram-local(url pos-start pos-end &optional force-reload)
-  (let* ((save-dir (cacoo:fix-directory))
+(defun cacoo:load-diagram-local(data &optional force-reload)
+  (let* ((url (cacoo:$img-url data))
          (from-path (cacoo:get-local-path-from-url url))
-         (org-path (expand-file-name
-                    (cacoo:get-filename-from-url url) 
-                    save-dir)))
+         (org-path (cacoo:$img-cached-file data)))
     (when force-reload (cacoo:clear-cache-file org-path))
     (unless (cacoo:file-exists-p org-path)
       (ignore-errors
         (copy-file from-path org-path t t)))
     (if (cacoo:file-exists-p org-path)
-        (cacoo:resize-diagram org-path pos-start pos-end)
-      (cacoo:display-diagram-by-text
-       pos-start pos-end "Could not copy a file."))))
+        (cacoo:resize-diagram data force-reload)
+      (setf (cacoo:$img-error data) "Could not copy a file.")
+      (cacoo:display-diagram-by-text data))))
 
-(defun cacoo:get-resize-path (path)
-  (expand-file-name
-   (format "resize_%s" (file-name-nondirectory path))
-   (file-name-directory path)))
-
-(defun cacoo:get-image-size (file)
-  (let ((ret (get-buffer-create " *Cacoo:identify*")) line)
+(defun cacoo:get-image-size (data)
+  (let* ((file (cacoo:$img-cached-file data))
+         (ret (get-buffer-create (format " *Cacoo:identify:%s*" file))) 
+         line)
     (buffer-disable-undo ret)
     (call-process "identify" nil ret nil "-format"
                   "%[fx:w] %[fx:h]" file)
@@ -188,25 +275,32 @@
             (max width height)))
       (kill-buffer ret))))
 
-(defun cacoo:resize-diagram (org-path pos-start pos-end &optional force-reload)
-  (lexical-let* ((org-size (cacoo:get-image-size org-path))
-                 (resize-path (cacoo:get-resize-path org-path)))
+(defun cacoo:resize-diagram (data &optional force-reload)
+  (lexical-let* 
+      ((org-size (cacoo:get-image-size data))
+       (data data))
     (cond
-     ((< org-size cacoo:max-size)
-      (cacoo:display-diagram org-path pos-start pos-end)
+     ((< org-size (cacoo:$img-size data))
+      (setf (cacoo:$img-resized-file data) 
+            (cacoo:$img-cached-file data))
+      (cacoo:display-diagram data)
       t)
-     ((and (not force-reload) (cacoo:file-exists-p resize-path))
-      (cacoo:display-diagram resize-path pos-start pos-end)
+     ((and (not force-reload) 
+           (cacoo:file-exists-p (cacoo:$img-resized-file data)))
+      (cacoo:display-diagram data)
       t)
      (t
       (lexical-let* 
-          ((pos-start pos-start) (pos-end pos-end)
-           (tmpbuf (get-buffer-create (format " *Cacoo:resize-temp:%s*" org-path)))
+          ((org-path (cacoo:$img-cached-file data))
+           (resize-path (cacoo:$img-resized-file data))
+           (size (cacoo:$img-size data))
+           (tmpbuf (get-buffer-create 
+                    (format " *Cacoo:resize-temp:%s*" org-path)))
            (proc
             (start-process 
              "Cacoo:convert" tmpbuf "convert" 
              "-resize" 
-             (format "%ix%i" cacoo:max-size cacoo:max-size)
+             (format "%ix%i" size size)
              "-transparent-color" "'#ffffff'"
              org-path 
              (concat (file-name-extension resize-path)
@@ -215,89 +309,108 @@
          proc (lambda (proc event)
                 (cond
                  ((string-match "exited abnormally" event)
-                  (kill-buffer tmpbuf)
-                  (cacoo:display-diagram-by-text 
-                   pos-start pos-end "Could not convert."))
+                  (setf (cacoo:$img-error data)
+                        (cacoo:buffer-string "Could not convert. \n%s" tmpbuf))
+                  (kill-buffer tmpbuf) 
+                  (cacoo:display-diagram-by-text data))
                  ((equal event "finished\n")
-                  (kill-buffer tmpbuf)
                   (if (and (file-exists-p resize-path)
                            (< 0 (nth 7 (file-attributes resize-path))))
-                      (cacoo:display-diagram resize-path pos-start pos-end)
-                    (cacoo:display-diagram-by-text 
-                     pos-start pos-end "Could not convert."))))
-                )))
+                      (cacoo:display-diagram data)
+                    (setf (cacoo:$img-error data)
+                          (cacoo:buffer-string "Could not convert. \n%s" tmpbuf))
+                    (cacoo:display-diagram-by-text data))
+                  (kill-buffer tmpbuf))))))
       t))))
 
-(defun cacoo:get-image-type (filename)
-  (let ((type (intern (file-name-extension filename))))
+(defun cacoo:buffer-string (format buf)
+  (format format
+          (with-current-buffer buf (buffer-string))))
+
+(defun cacoo:get-image-type (data)
+  (let ((type (intern (file-name-extension 
+                       (cacoo:$img-resized-file data)))))
     (if (eq type 'jpg) 'jpeg type)))
 
-(defun cacoo:display-diagram (resize-path pos-start pos-end)
+(defun cacoo:display-diagram (data)
   (clear-image-cache)
   (let ((img (create-image 
-              resize-path (cacoo:get-image-type resize-path) nil
-              :relief 1)))
-    (put-text-property pos-start pos-end 'display img)
-    (cacoo:add-click-action pos-start pos-end)))
+              (cacoo:$img-resized-file data)
+              (cacoo:get-image-type data) nil
+              :relief 1))
+        (map (make-sparse-keymap)))
+    (define-key map [mouse-1] 'cacoo:do-click-link)
+    (define-key map (kbd "\n") 'cacoo:do-click-link)
+    (add-text-properties 
+     (cacoo:$img-start data)
+     (cacoo:$img-end data)
+     (list 'display img 'keymap map 'mouse-face 'highlight))))
 
-(defun cacoo:display-diagram-by-text (pos-start pos-end &optional text)
+
+(defun cacoo:display-diagram-by-text (data)
   (put-text-property 
-   pos-start pos-end 'help-echo (format "Cacoo: Error  %s" text)))
+   (cacoo:$img-start data) (cacoo:$img-end data)
+   'help-echo (format "Cacoo: Error  %s" 
+                      (cacoo:$img-error data))))
 
 (defun cacoo:do-next-diagram (action)
   (cond
    ((re-search-forward cacoo:img-regexp nil t)
     (let* ((line (match-string 0))
-           (url (match-string 1))
-           (pos-start (match-beginning 0))
-           (pos-end (match-end 0)))
-      (funcall action url pos-start pos-end line)
-      (goto-char pos-end)))
+           (start (match-beginning 0))
+           (end (match-end 0))
+           (cols (split-string (match-string 1) "[ \t]+"))
+           (url (car cols))
+           (filename (cacoo:get-filename-from-url url))
+           (data 
+            (make-cacoo:$img
+             :line line :url url :start start :end end
+             :cached-file (cacoo:get-cache-path filename)
+             :resized-file (cacoo:get-resize-path filename)
+             :size (cacoo:aif (cadr cols) (string-to-int it) cacoo:max-size))))
+      (funcall action data)
+      (goto-char end)))
    (t
     nil)))
 
 (defun cacoo:load-next-diagram (&optional force-reload)
   (lexical-let ((force-reload force-reload))
     (cacoo:do-next-diagram
-     (lambda (url pos-start pos-end line)
-       (cond
-        ((string-match "^file:\\/\\/\\/" url)
-         (cacoo:load-diagram-local url pos-start pos-end force-reload)
-         pos-end)
-        ((string-match "^https?:\\/\\/" url)
-         (cacoo:load-diagram-remote url pos-start pos-end force-reload)
-         pos-end)
-        (t ; 相対パスを仮定
-         (cacoo:load-diagram-local
-          url pos-start pos-end force-reload)
-         pos-end))))))
+     (lambda (data)
+       (let ((url (cacoo:$img-url data))
+             (pos-end (cacoo:$img-end data)))
+         (cacoo:fix-directory)
+         (cond
+          ((string-match "^file:\\/\\/\\/" url)
+           (cacoo:load-diagram-local data force-reload)
+           pos-end)
+          ((string-match "^https?:\\/\\/" url)
+           (cacoo:load-diagram-remote data force-reload)
+           pos-end)
+          (t ; 相対パスを仮定
+           (cacoo:load-diagram-local data force-reload)
+           pos-end)))))))
 
 (defun cacoo:revert-next-diagram ()
   (cacoo:do-next-diagram
-   (lambda (url pos-start pos-end line)
+   (lambda (data)
      (remove-text-properties 
-      pos-start pos-end
+      (cacoo:$img-start data) (cacoo:$img-end data) 
       '(display nil mouse-face nil help-echo nil keymap nil))
-     pos-end)))
-
-(defun cacoo:add-click-action (pos-start pos-end)
-  (let ((map (make-sparse-keymap)))
-    (define-key map [mouse-1] 'cacoo:do-click-link)
-    (define-key map (kbd "\n") 'cacoo:do-click-link)
-    (add-text-properties pos-start pos-end
-                         (list 'keymap map 'mouse-face 'highlight))))
+     (cacoo:$img-end data))))
 
 (defun cacoo:do-click-link ()
   (interactive)
   (beginning-of-line)
-  (cacoo:view-next-diagram-command))
+  (cacoo:edit-next-diagram-command))
 
 (defun cacoo:clear-all-cache-files ()
   ;;現在のキャッシュディレクトリの中身を全部削除する
   (let ((imd-dir (cacoo:get-cache-dir)))
     (loop for i in (directory-files imd-dir)
-          if (file-regular-p i)
-          do (delete-file i))))
+          for f = (expand-file-name i imd-dir)
+          if (file-regular-p f)
+          do (delete-file f))))
 
 (defun cacoo:view-original-cached-image (cached-file)
   ;;原寸大の画像を参照する
@@ -312,6 +425,36 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Commands and Minor Mode Definitions
+
+(defun cacoo:insert-pattern-command ()
+  (interactive)
+  (insert (format cacoo:img-pattern "")))
+
+(defun cacoo:insert-yank-command ()
+  (interactive)
+  (insert (format cacoo:img-pattern 
+                  (current-kill 0))))
+
+(defun cacoo:insert-url ()
+  (interactive)
+  ;;patternを入れる。kill-ringにcacooのパターンがあれば入れる
+  (insert (format cacoo:img-pattern 
+                  (if (string-match (current-kill 0)
+
+(defun cacoo:view-local-cache-next-diagram-command () 
+  (interactive)
+  ;;原寸大の画像をローカルの環境で参照する
+  (cacoo:do-next-diagram
+   (lambda (data)
+     (cacoo:view-original-cached-image 
+      (cacoo:$img-cached-file data)))))
+
+(defun cacoo:clear-all-cache-files-command ()
+  (interactive)
+  ;;キャッシュフォルダの中身を空にする
+  (when (yes-or-no-p "Delete all local cache files?")
+    (cacoo:clear-all-cache-files)
+    (message "Delete all local cache files.")))
 
 (defun cacoo:reload-next-diagram-command ()
   (interactive)
@@ -405,7 +548,7 @@
   (interactive)
   (end-of-line)
   (cacoo:do-next-diagram 
-   (lambda (url pos-start pos-end line) t))
+   (lambda (data) t))
   (beginning-of-line))
 
 (defun cacoo:navi-prev-diagram-command ()
@@ -428,9 +571,15 @@
          ("C-c d"   . cacoo:display-next-diagram-command)
          ("C-c D"   . cacoo:display-all-diagrams-command)
 
+         ("C-c i"   . cacoo:insert-pattern-command)
+         ("C-c y"   . cacoo:insert-yank-command)
+
          ("C-c N"   . cacoo:create-new-diagram-command)
          ("C-c e"   . cacoo:edit-next-diagram-command)
          ("C-c v"   . cacoo:view-next-diagram-command)
+         ("C-c V"   . cacoo:view-local-cache-next-diagram-command)
+
+         ("C-c C"   . cacoo:clear-all-cache-files-command)
 
          ("C-c l"   . cacoo:open-diagram-list-command)
          )))
