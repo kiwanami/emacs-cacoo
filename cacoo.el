@@ -435,12 +435,6 @@
   (insert (format cacoo:img-pattern 
                   (current-kill 0))))
 
-(defun cacoo:insert-url ()
-  (interactive)
-  ;;patternを入れる。kill-ringにcacooのパターンがあれば入れる
-  (insert (format cacoo:img-pattern 
-                  (if (string-match (current-kill 0)
-
 (defun cacoo:view-local-cache-next-diagram-command () 
   (interactive)
   ;;原寸大の画像をローカルの環境で参照する
