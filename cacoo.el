@@ -495,12 +495,12 @@
 (defun cacoo:create-new-diagram-command ()
   (interactive)
   ;;ブラウザで新規図を開く
-  (browse-url-default-browser cacoo:new-url))
+  (browse-url cacoo:new-url))
 
 (defun cacoo:open-diagram-list-command ()
   (interactive)
   ;;ブラウザで図の一覧を開く
-  (browse-url-default-browser cacoo:list-url))
+  (browse-url cacoo:list-url))
 
 (defun cacoo:get-key-from-url (url)
   (if (string-match cacoo:key-regexp url)
@@ -527,8 +527,8 @@
                (key (cacoo:get-key-from-url url))
                (open-url (cacoo:make-url tmpl-url key)))
           (if open-url 
-              (browse-url-default-browser open-url)
-            (browse-url-default-browser url))))
+              (browse-url open-url)
+            (browse-url url))))
        (t
         (setq error-message "URL is not found."))))
     (when error-message 
