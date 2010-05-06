@@ -206,6 +206,7 @@
 (defun cacoo:load-diagram-remote(data &optional force-reload)
   (lexical-let* ((data data) (force-reload force-reload)
                  (org-path (cacoo:$img-cached-file data))
+                 (url (cacoo:$img-url data))
                  proc tmpbuf)
     (when force-reload (cacoo:clear-cache-file org-path))
     (cond
@@ -270,8 +271,8 @@
         (with-current-buffer ret
           (let* ((line (buffer-string))
                  (cols (split-string line " "))
-                 (width (string-to-int (car cols)))
-                 (height (string-to-int (cadr cols))))
+                 (width (string-to-number (car cols)))
+                 (height (string-to-number (cadr cols))))
             (max width height)))
       (kill-buffer ret))))
 
@@ -367,7 +368,7 @@
              :line line :url url :start start :end end
              :cached-file (cacoo:get-cache-path filename)
              :resized-file (cacoo:get-resize-path filename)
-             :size (cacoo:aif (cadr cols) (string-to-int it) cacoo:max-size))))
+             :size (cacoo:aif (cadr cols) (string-to-number it) cacoo:max-size))))
       (funcall action data)
       (goto-char end)))
    (t
