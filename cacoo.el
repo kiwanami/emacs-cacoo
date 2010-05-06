@@ -529,7 +529,7 @@
               (browse-url-default-browser open-url)
             (browse-url-default-browser url))))
        (t
-        (setq "URL is not found."))))
+        (setq error-message "URL is not found."))))
     (when error-message 
       (message error-message))))
 
