@@ -615,5 +615,31 @@
   (cacoo-minor-mode 
    (if cacoo-minor-mode -1 1)))
 
+(require 'easymenu)
+
+(setq cacoo:minor-mode-menu-spec
+'("Cacoo"
+    ["Display all diagrams" cacoo:display-all-diagrams-command :active t :visible t]
+    ["Revert all diagrams" cacoo:revert-all-diagrams-command  :active t :visible t]
+    ["Reload all diagrams" cacoo:reload-all-diagrams-command  :active t :visible t]
+    "----"
+    ["Display a diagram" cacoo:display-next-diagram-command t]
+    ["Revert a diagram" cacoo:revert-next-diagram-command t]
+    ["Reload a diagram" cacoo:reload-next-diagram-command t]
+    ["Edit a diagram" cacoo:edit-next-diagram-command t]
+    ["View diagram details" cacoo:view-next-diagram-command t]
+    ["View a local cache" cacoo:view-local-cache-next-diagram-command t]
+    "----"
+    ["Create new diagram" cacoo:create-new-diagram-command t]
+    ["List diagrams" cacoo:open-diagram-list-command t]
+    "----"
+    ["Clear all cache files" cacoo:clear-all-cache-files-command t]))
+
+
+(easy-menu-define cacoo-menu-map
+ cacoo-minor-mode-keymap "Cacoo menu map" 
+ cacoo:minor-mode-menu-spec)
+(easy-menu-add cacoo-menu-map cacoo-minor-mode-keymap)
+
 (provide 'cacoo)
 ;;; cacoo.el ends here
