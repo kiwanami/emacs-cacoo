@@ -339,20 +339,23 @@
               (cacoo:$img-resized-file data)
               (cacoo:get-image-type data) nil
               :relief 1))
-        (map (make-sparse-keymap)))
+        (map (make-sparse-keymap))
+        (mod (buffer-modified-p)))
     (define-key map [mouse-1] 'cacoo:do-click-link)
     (define-key map (kbd "\n") 'cacoo:do-click-link)
     (add-text-properties 
      (cacoo:$img-start data)
      (cacoo:$img-end data)
-     (list 'display img 'keymap map 'mouse-face 'highlight))))
-
+     (list 'display img 'keymap map 'mouse-face 'highlight))
+    (set-buffer-modified-p mod)))
 
 (defun cacoo:display-diagram-by-text (data)
-  (put-text-property 
-   (cacoo:$img-start data) (cacoo:$img-end data)
-   'help-echo (format "Cacoo: Error  %s" 
-                      (cacoo:$img-error data))))
+  (let ((mod (buffer-modified-p)))
+    (put-text-property 
+     (cacoo:$img-start data) (cacoo:$img-end data)
+     'help-echo (format "Cacoo: Error  %s" 
+                        (cacoo:$img-error data)))
+    (set-buffer-modified-p mod)))
 
 (defun cacoo:do-next-diagram (action)
   (cond
@@ -395,9 +398,11 @@
 (defun cacoo:revert-next-diagram ()
   (cacoo:do-next-diagram
    (lambda (data)
-     (remove-text-properties 
-      (cacoo:$img-start data) (cacoo:$img-end data) 
-      '(display nil mouse-face nil help-echo nil keymap nil))
+     (let ((mod (buffer-modified-p)))
+       (remove-text-properties 
+        (cacoo:$img-start data) (cacoo:$img-end data) 
+        '(display nil mouse-face nil help-echo nil keymap nil))
+       (set-buffer-modified-p mod))
      (cacoo:$img-end data))))
 
 (defun cacoo:do-click-link ()
