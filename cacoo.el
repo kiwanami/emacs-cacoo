@@ -558,30 +558,30 @@
 
 (setq cacoo-minor-mode-keymap
       (cacoo:define-keymap
-       '(("C-c C-q" . cacoo:minor-mode-off-command)
-         ("C-c n"   . cacoo:navi-next-diagram-command)
-         ("C-c p"   . cacoo:navi-prev-diagram-command)
+       '(("C-c , C-q" . cacoo:minor-mode-off-command)
+         ("C-c , n"   . cacoo:navi-next-diagram-command)
+         ("C-c , p"   . cacoo:navi-prev-diagram-command)
 
-         ("C-c r"   . cacoo:reload-next-diagram-command)
-         ("C-c R"   . cacoo:reload-all-diagrams-command)
+         ("C-c , r"   . cacoo:reload-next-diagram-command)
+         ("C-c , R"   . cacoo:reload-all-diagrams-command)
 
-         ("C-c t"   . cacoo:revert-next-diagram-command)
-         ("C-c T"   . cacoo:revert-all-diagrams-command)
+         ("C-c , t"   . cacoo:revert-next-diagram-command)
+         ("C-c , T"   . cacoo:revert-all-diagrams-command)
 
-         ("C-c d"   . cacoo:display-next-diagram-command)
-         ("C-c D"   . cacoo:display-all-diagrams-command)
+         ("C-c , d"   . cacoo:display-next-diagram-command)
+         ("C-c , D"   . cacoo:display-all-diagrams-command)
 
-         ("C-c i"   . cacoo:insert-pattern-command)
-         ("C-c y"   . cacoo:insert-yank-command)
+         ("C-c , i"   . cacoo:insert-pattern-command)
+         ("C-c , y"   . cacoo:insert-yank-command)
 
-         ("C-c N"   . cacoo:create-new-diagram-command)
-         ("C-c e"   . cacoo:edit-next-diagram-command)
-         ("C-c v"   . cacoo:view-next-diagram-command)
-         ("C-c V"   . cacoo:view-local-cache-next-diagram-command)
+         ("C-c , N"   . cacoo:create-new-diagram-command)
+         ("C-c , e"   . cacoo:edit-next-diagram-command)
+         ("C-c , v"   . cacoo:view-next-diagram-command)
+         ("C-c , V"   . cacoo:view-local-cache-next-diagram-command)
 
-         ("C-c C"   . cacoo:clear-all-cache-files-command)
+         ("C-c , C"   . cacoo:clear-all-cache-files-command)
 
-         ("C-c l"   . cacoo:open-diagram-list-command)
+         ("C-c , l"   . cacoo:open-diagram-list-command)
          )))
 
 (defun cacoo:minor-mode-off-command ()
