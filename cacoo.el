@@ -310,6 +310,7 @@
 (defun cacoo:proc (name commands ok ng)
   ;; name プロセス、バッファを特定する名前
   ;; commands コマンドラインで実行するものの文字列リスト
+  ;; →lambdaの場合は前のプロセスのokの実行結果を引数にしてfuncallする
   ;; ok プロセス正常終了時に呼ばれる。引数：出力文字列
   ;; ng プロセス異常終了時に呼ばれる。引数：出力文字列
   (list name commands ok ng))
