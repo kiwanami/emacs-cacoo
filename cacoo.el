@@ -226,12 +226,14 @@
   (incf cacoo:uid-count)
   (format " *Cacoo:%s:%i*" name cacoo:uid-count))
 
-(defvar cacoo:async-counter-start  0) ; 開始非同期プロセスの数をカウント
-(defvar cacoo:async-counter-finish 0) ; 終了非同期プロセスの数をカウント
+(defvar cacoo:async-counter-start  0) ; 開始非同期プロセスの数
+(defvar cacoo:async-counter-finish 0) ; 終了非同期プロセスの数
+(defvar cacoo:async-counter-error  0) ; エラー終了非同期プロセスの数
 
 (defun cacoo:async-reset-counter ()
   (setq cacoo:async-counter-start  0
-        cacoo:async-counter-finish 0)
+        cacoo:async-counter-finish 0
+        cacoo:async-counter-error  0)
   (cacoo:log "ASYNC COUNTER RESET"))
 
 (defun cacoo:async-start ()
@@ -242,12 +244,21 @@
   (incf cacoo:async-counter-finish)
   (cacoo:async-display-message))
 
+(defun cacoo:async-finish-error ()
+  (incf cacoo:async-counter-finish)
+  (incf cacoo:async-counter-error)
+  (cacoo:async-display-message))
+
 (defun cacoo:async-display-message ()
-  (message 
-   (if (eql cacoo:async-counter-finish cacoo:async-counter-start)
-       "Cacoo tasks are done. (%i/%i)"
-     "Cacoo processing.. (%i/%i)")
-   cacoo:async-counter-finish cacoo:async-counter-start))
+  (let ((error-message
+         (if (< 0 cacoo:async-counter-error)
+             (format "  %i errors" cacoo:async-counter-error) "")))
+    (message 
+     (if (eql cacoo:async-counter-finish cacoo:async-counter-start)
+         "Cacoo tasks are done. (%i/%i%s)"
+       "Cacoo processing.. (%i/%i%s)" )
+     cacoo:async-counter-finish cacoo:async-counter-start
+     error-message)))
 
 (defun cacoo:async (&rest procs)
   (cacoo:async-gen 'cacoo:async-start procs))
@@ -283,7 +294,7 @@
                   (cacoo:log "ASYNC-E %i [%s]" dcount msg)
                   (kill-buffer tmpbuf)
                   (funcall ng msg)
-                  (cacoo:async-finish)))
+                  (cacoo:async-finish-error)))
                ((equal event "finished\n")
                 (let* ((msg (prog1 
                                 (if (buffer-live-p tmpbuf)
