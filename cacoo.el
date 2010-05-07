@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.0
+;; Version: 1.1
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -104,6 +104,20 @@
 
 ;; 外部画像ビューアーのプログラムは cacoo:external-viewer で指定します。
 ;; nilに設定するとEmacsで開こうとします。
+
+;;; 制限事項
+
+;; 同一バッファ内で、同一画像を複数回表示することができません。
+
+;;; 更新履歴
+
+;; Revision 1.1  2010/05/08  sakurai
+;; エラー箇所をオーバーレイで強調
+;; 非同期処理経過の表示
+;; 透過PNGの背景色がおかしい場合や、ImageMagickのバージョンが古い場合に対応。
+;;
+;; Revision 1.0  2010/05/07  sakurai
+;; Initial revision
 
 ;;; Code:
 
