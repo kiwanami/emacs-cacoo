@@ -229,6 +229,9 @@
 (defvar cacoo:async-counter-start  0) ; 開始非同期プロセスの数
 (defvar cacoo:async-counter-finish 0) ; 終了非同期プロセスの数
 (defvar cacoo:async-counter-error  0) ; エラー終了非同期プロセスの数
+(make-variable-buffer-local 'cacoo:async-counter-start)
+(make-variable-buffer-local 'cacoo:async-counter-finish)
+(make-variable-buffer-local 'cacoo:async-counter-error)
 
 (defun cacoo:async-reset-counter ()
   (setq cacoo:async-counter-start  0
@@ -261,9 +264,9 @@
      error-message)))
 
 (defun cacoo:async (&rest procs)
-  (cacoo:async-gen 'cacoo:async-start procs))
+  (cacoo:async-gen 'cacoo:async-start (current-buffer) procs))
 
-(defun cacoo:async-gen (args procs)
+(defun cacoo:async-gen (args buf procs)
   ;;procsを実行して回る
   ;;エラーが出たら中断
   (when procs
@@ -273,39 +276,40 @@
         ((proc (car procs)) (next-procs (cdr procs))
          (name (car proc)) (cmds (cadr proc))
          (ok (nth 2 proc)) (ng (nth 3 proc))
-         (tag (car cmds))
+         (tag (car cmds)) (buf buf)
          (tmpbuf (get-buffer-create 
                   (format " *Cacoo:temp:%s*" name)))
          (rcmds (if (and tag (symbolp tag) (eq tag 'lambda))
-                    (funcall cmds args)
-                  cmds))
+                    (funcall cmds args) cmds))
          (proc
           (apply 'start-process (cacoo:uid name) tmpbuf rcmds))
          (dcount cacoo:uid-count))
       (cacoo:log "ASYNC-S %i : %s %s" dcount tag rcmds)
       (set-process-sentinel
-       proc (lambda (proc event)
-              (cacoo:log "ASYNC-E %i : %s %s" dcount tag event)
-              (cond
-               ((string-match "exited abnormally" event)
-                (let ((msg (if (buffer-live-p tmpbuf)
-                               (cacoo:buffer-string "%s" tmpbuf)
-                             (concat "NA:" name))))
-                  (cacoo:log "ASYNC-E %i [%s]" dcount msg)
-                  (kill-buffer tmpbuf)
-                  (funcall ng msg)
-                  (cacoo:async-finish-error)))
-               ((equal event "finished\n")
-                (let* ((msg (prog1 
-                                (if (buffer-live-p tmpbuf)
-                                    (cacoo:buffer-string "%s" tmpbuf)
-                                  (concat "NA:" name))
-                              (kill-buffer tmpbuf)))
-                       (ret (funcall ok msg)))
-                  (cacoo:log "ASYNC-E %i [%s]" dcount msg)
-                  (if next-procs
-                      (cacoo:async-gen ret next-procs)
-                    (cacoo:async-finish))))))))))
+       proc
+       (lambda (proc event)
+         (with-current-buffer buf
+           (cacoo:log "ASYNC-E %i : %s %s" dcount tag event)
+           (cond
+            ((string-match "exited abnormally" event)
+             (let ((msg (if (buffer-live-p tmpbuf)
+                            (cacoo:buffer-string "%s" tmpbuf)
+                          (concat "NA:" name))))
+               (cacoo:log "ASYNC-E %i [%s]" dcount msg)
+               (kill-buffer tmpbuf)
+               (funcall ng msg)
+               (cacoo:async-finish-error)))
+            ((equal event "finished\n")
+             (let* ((msg (prog1 
+                             (if (buffer-live-p tmpbuf)
+                                 (cacoo:buffer-string "%s" tmpbuf)
+                               (concat "NA:" name))
+                           (kill-buffer tmpbuf)))
+                    (ret (funcall ok msg)))
+               (cacoo:log "ASYNC-E %i [%s]" dcount msg)
+               (if next-procs
+                   (cacoo:async-gen ret buf next-procs)
+                 (cacoo:async-finish)))))))))))
 
 (defun cacoo:proc (name commands ok ng)
   ;; name プロセス、バッファを特定する名前
@@ -485,7 +489,7 @@
                       (concat (file-name-extension resize-path) ":" resize-path))
                 'identity
                 (funcall err "Could not convert")) procs)))
-    (cacoo:async-gen 'cacoo:async-start procs)))
+    (cacoo:async-gen 'cacoo:async-start (current-buffer) procs)))
 
 (defun cacoo:buffer-string (format buf)
   (format format
@@ -510,7 +514,43 @@
      (cacoo:$img-start data)
      (cacoo:$img-end data)
      (list 'display img 'keymap map 'mouse-face 'highlight))
+    (cacoo:display-diagram-overlay-remove 
+     (cacoo:$img-start data)
+     (cacoo:$img-end data))
     (set-buffer-modified-p mod)))
+
+(defvar cacoo:display-diagram-overlays nil) ; エラー表示用のオーバーレイ
+(make-variable-buffer-local 'cacoo:display-diagram-overlays)
+
+(defun cacoo:display-diagram-overlay-add (start end)
+  (when
+      (loop for i in cacoo:display-diagram-overlays
+            if (and ; 既存のOLとかぶってないかチェック
+                (< start (overlay-end i))
+                (> end (overlay-start i)))
+            return nil
+            finally return t)
+    (let ((ol (make-overlay start end)))
+      (overlay-put ol 'face 'next-error)
+      (push ol cacoo:display-diagram-overlays))))
+
+(defun cacoo:display-diagram-overlay-remove (start end)
+   (setq cacoo:display-diagram-overlays 
+         (loop for i in cacoo:display-diagram-overlays
+               if (and
+                   (overlay-buffer i)
+                   (or
+                    (> start (overlay-end i))
+                    (< end (overlay-start i))))
+               collect i
+               else
+               do (delete-overlay i))))
+
+(defun cacoo:display-diagram-overlay-clear ()
+  (loop for i in cacoo:display-diagram-overlays
+        if (overlay-buffer i)
+        do (delete-overlay i))
+  (setq cacoo:display-diagram-overlays nil))
 
 (defun cacoo:display-diagram-by-text (data)
   (let ((mod (buffer-modified-p)))
@@ -518,6 +558,8 @@
      (cacoo:$img-start data) (cacoo:$img-end data)
      'help-echo (format "Cacoo: Error  %s" 
                         (cacoo:$img-error data)))
+    (cacoo:display-diagram-overlay-add
+     (cacoo:$img-start data) (cacoo:$img-end data))
     (set-buffer-modified-p mod)))
 
 (defun cacoo:do-next-diagram (action)
@@ -566,6 +608,8 @@
        (remove-text-properties 
         (cacoo:$img-start data) (cacoo:$img-end data) 
         '(display nil mouse-face nil help-echo nil keymap nil))
+       (cacoo:display-diagram-overlay-remove
+        (cacoo:$img-start data) (cacoo:$img-end data))
        (set-buffer-modified-p mod))
      (cacoo:$img-end data))))
 
@@ -777,6 +821,7 @@
   (cacoo:display-all-diagrams-command))
 
 (defun cacoo:minor-mode-abort ()
+  (cacoo:display-diagram-overlay-clear)
   (cacoo:revert-all-diagrams-command))
 
 (defun toggle-cacoo-minor-mode ()
@@ -823,6 +868,7 @@
 
 ;; (setq cacoo:png-background nil)
 ;; (setq cacoo:png-background "white")
+;; (setq cacoo:debug t)
 ;; (setq cacoo:debug nil)
 
 (provide 'cacoo)
