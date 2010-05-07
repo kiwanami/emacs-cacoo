@@ -209,12 +209,6 @@
   (if (string-match "[^/]*$" url) ; URLがパラメーターの時は怪しい
       (match-string 0 url)))
 
-(defvar cacoo:uid-count 0)
-
-(defun cacoo:uid (name)
-  (incf cacoo:uid-count)
-  (format " *Cacoo:%s:%i*" name cacoo:uid-count))
-
 (defun cacoo:file-exists-p (file)
   (and (file-exists-p file)
        (< 0 (nth 7 (file-attributes file)))))
@@ -226,13 +220,44 @@
              (when (file-exists-p it)
                (delete-file it))))
 
+(defvar cacoo:uid-count 0) ; 非同期プロセス作成用
+
+(defun cacoo:uid (name)
+  (incf cacoo:uid-count)
+  (format " *Cacoo:%s:%i*" name cacoo:uid-count))
+
+(defvar cacoo:async-counter-start  0) ; 開始非同期プロセスの数をカウント
+(defvar cacoo:async-counter-finish 0) ; 終了非同期プロセスの数をカウント
+
+(defun cacoo:async-reset-counter ()
+  (setq cacoo:async-counter-start  0
+        cacoo:async-counter-finish 0)
+  (cacoo:log "ASYNC COUNTER RESET"))
+
+(defun cacoo:async-start ()
+  (incf cacoo:async-counter-start)
+  (cacoo:async-display-message))
+
+(defun cacoo:async-finish ()
+  (incf cacoo:async-counter-finish)
+  (cacoo:async-display-message))
+
+(defun cacoo:async-display-message ()
+  (message 
+   (if (eql cacoo:async-counter-finish cacoo:async-counter-start)
+       "Cacoo tasks are done. (%i/%i)"
+     "Cacoo processing.. (%i/%i)")
+   cacoo:async-counter-finish cacoo:async-counter-start))
+
 (defun cacoo:async (&rest procs)
-  (cacoo:async-gen nil procs))
+  (cacoo:async-gen 'cacoo:async-start procs))
 
 (defun cacoo:async-gen (args procs)
   ;;procsを実行して回る
   ;;エラーが出たら中断
   (when procs
+    (when (eq args 'cacoo:async-start) 
+      (cacoo:async-start))
     (lexical-let*
         ((proc (car procs)) (next-procs (cdr procs))
          (name (car proc)) (cmds (cadr proc))
@@ -257,7 +282,8 @@
                              (concat "NA:" name))))
                   (cacoo:log "ASYNC-E %i [%s]" dcount msg)
                   (kill-buffer tmpbuf)
-                  (funcall ng msg)))
+                  (funcall ng msg)
+                  (cacoo:async-finish)))
                ((equal event "finished\n")
                 (let* ((msg (prog1 
                                 (if (buffer-live-p tmpbuf)
@@ -266,7 +292,9 @@
                               (kill-buffer tmpbuf)))
                        (ret (funcall ok msg)))
                   (cacoo:log "ASYNC-E %i [%s]" dcount msg)
-                  (cacoo:async-gen ret next-procs)))))))))
+                  (if next-procs
+                      (cacoo:async-gen ret next-procs)
+                    (cacoo:async-finish))))))))))
 
 (defun cacoo:proc (name commands ok ng)
   ;; name プロセス、バッファを特定する名前
@@ -445,7 +473,7 @@
                       (concat (file-name-extension resize-path) ":" resize-path))
                 'identity
                 (funcall err "Could not convert")) procs)))
-    (cacoo:async-gen nil procs)))
+    (cacoo:async-gen 'cacoo:async-start procs)))
 
 (defun cacoo:buffer-string (format buf)
   (format format
@@ -568,6 +596,7 @@
 (defun cacoo:view-local-cache-next-diagram-command () 
   (interactive)
   ;;原寸大の画像をローカルの環境で参照する
+  (cacoo:async-reset-counter)
   (cacoo:do-next-diagram
    (lambda (data)
      (cacoo:view-original-cached-image 
@@ -583,12 +612,14 @@
 (defun cacoo:reload-next-diagram-command ()
   (interactive)
   ;;カーソール直後の図をリロードする
+  (cacoo:async-reset-counter)
   (save-excursion
     (cacoo:load-next-diagram t)))
 
 (defun cacoo:reload-all-diagrams-command ()
   (interactive)
   ;;バッファ内のすべての図を更新する
+  (cacoo:async-reset-counter)
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:load-next-diagram t))))
@@ -610,6 +641,7 @@
   (interactive)
   ;;バッファ内のすべての図を表示する
   ;;キャッシュがあればそれを使う
+  (cacoo:async-reset-counter)
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:load-next-diagram))))
@@ -618,6 +650,7 @@
   (interactive)
   ;;カーソール直後の図を表示する
   ;;キャッシュがあればそれを使う
+  (cacoo:async-reset-counter)
   (save-excursion
     (cacoo:load-next-diagram)))
 
