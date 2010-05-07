@@ -128,7 +128,7 @@
 (defvar cacoo:max-size 450) ; デフォルトの縮小サイズ
 
 (defvar cacoo:external-viewer "display") ; ローカルの画像ビューアー。nilだとEmacsで開く。
-(defvar cacoo:png-background "white") ; 透過PNGの背景色がおかしい場合にセット
+(defvar cacoo:png-background nil) ; 透過PNGの背景色がおかしい場合にセット
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Fundamental Functions
