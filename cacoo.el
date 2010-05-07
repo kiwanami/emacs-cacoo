@@ -450,19 +450,19 @@
                  (cacoo:display-diagram-by-text ,data)))) procs)
     (setq procs
           (list
-           (cacoo:proc
+           (cacoo:proc ; 縮小した画像のサイズを取得
             org-path
             (list "identify" "-format" "%wx%h" resize-path)
             'identity ; <- 次の実行で使う
             (funcall err "Could not identify"))
-           (cacoo:proc
+           (cacoo:proc ; 縮小した画像と同じサイズの背景画像を準備
             org-path
             (lambda (args) (list "convert" "-size" args
                                  (concat "xc:" cacoo:png-background) 
                                  tmpfile))
             'identity
             (funcall err "Could not make bgimage"))
-           (cacoo:proc 
+           (cacoo:proc ; 背景に重ねる
             org-path
             (list "convert" tmpfile resize-path "-flatten" resize-path)
             (lambda (msg)
@@ -475,9 +475,9 @@
                 (delete-file tmpfile)))
             (funcall err "Could not compose"))))
     (if not-resizep
-        (ignore-errors
+        (ignore-errors ; 十分画像のサイズが小さいときはコピー
           (copy-file org-path resize-path t t))
-        (setq procs 
+        (setq procs  ; 大きい画像は縮小する（タスクの先頭に追加）
               (cons 
                (cacoo:proc
                 org-path
