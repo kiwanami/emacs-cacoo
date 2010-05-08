@@ -163,7 +163,8 @@
      keymap-list)
     map))
 
-(defvar cacoo:debug nil "Debug output switch.") ; debug
+(eval-and-compile
+  (defvar cacoo:debug nil "Debug output switch.")) ; debug
 (defvar cacoo:debug-count 0 "[internal] Debug output counter.") ; debug
 
 (defmacro cacoo:log (&rest args)
