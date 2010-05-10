@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.1
+;; Version: 1.2
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -45,8 +45,11 @@
 ;; テキスト中に以下のように記述するとCacooの絵が入ります。
 ;; [img:https://cacoo.com/diagrams/6m4ATG1ddlUiHPqd-0FAF7.png 200]
 ;; 
+;; ※注意点として、Cacoo側でURLによる公開設定をしておく必要があります。
+;; 公開設定にしても、URLが他人に知られない限り図を見ることができません。
+
 ;; cacoo-minor-modeがOnの時に以下のキーバインドが使えます。
-;; （cacoo-minor-mode-keymapをカスタマイズしてみてください）
+;; （使いやすくcacoo-minor-mode-keymapをカスタマイズしてみてください）
 
 ;; * バッファ全体に対して
 ;; C-c , T : バッファのすべての図をテキストに戻す
@@ -83,6 +86,11 @@
 ;; ローカルの画像（相対パス）
 ;; [img:zzz.png]
 
+;; 画像の取得や変換中にエラーが起きた場合、該当箇所の色が変わります。ま
+;; た、マウスオーバーで短くエラーメッセージがポップアップで表示されます。
+;; 大抵の問題は、wgetが見つからない、convertが見つからない、URL先の図が
+;; 見つからないなどだと思います。
+
 ;;; カスタマイズなど
 
 ;; ブラウザーはEmacsで設定してあるデフォルトブラウザーを使います。
@@ -105,12 +113,21 @@
 ;; 外部画像ビューアーのプログラムは cacoo:external-viewer で指定します。
 ;; nilに設定するとEmacsで開こうとします。
 
+;; Emacs22などではPNGの透過部分が黒くなることがあります。
+;; (setq cacoo:png-background "white") を設定に追加して画像の
+;; リロードをしてみてください。
+
 ;;; 制限事項
 
 ;; 同一バッファ内で、同一画像を複数回表示することができません。
 
 ;;; 更新履歴
 
+;; Revision 1.2  2010/05/08  sakurai
+;; バイトコンパイル時のバグ修正（by kitokitokiさん）
+;; 本文コメントに注意点などを追加
+;; 画像クリック時の動作を改善
+;; 
 ;; Revision 1.1  2010/05/08  sakurai
 ;; エラー箇所をオーバーレイで強調
 ;; 非同期処理経過の表示
@@ -631,7 +648,25 @@
 (defun cacoo:do-click-link ()
   (interactive)
   (beginning-of-line)
-  (cacoo:edit-next-diagram-command))
+  (cacoo:do-next-diagram
+   (lambda (data)
+     (let ((url (cacoo:$img-url data))
+           (pos-end (cacoo:$img-start data))
+           (pos-start (cacoo:$img-start data)))
+       (goto-char pos-start)
+       (beginning-of-line)
+       (cond
+        ((string-match "^file:\\/\\/\\/" url)
+         (cacoo:view-original-cached-image
+          (cacoo:$img-cached-file data))
+         pos-end)
+        ((string-match "^https?:\\/\\/" url)
+         (cacoo:edit-next-diagram-command)
+         pos-end)
+        (t ; 相対パスを仮定
+         (cacoo:view-original-cached-image
+          (cacoo:$img-cached-file data))
+         pos-end))))))
 
 (defun cacoo:clear-all-cache-files ()
   ;;現在のキャッシュディレクトリの中身を全部削除する
@@ -756,7 +791,7 @@
       (cond
        ((re-search-forward cacoo:img-regexp)
         (let* ((line (match-string 0))
-               (url (match-string 1))
+               (url (car (split-string (match-string 1) "[ \t]")))
                (key (cacoo:get-key-from-url url))
                (open-url (cacoo:make-url tmpl-url key)))
           (if open-url 
