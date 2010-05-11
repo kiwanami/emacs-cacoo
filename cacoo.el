@@ -64,6 +64,10 @@
 ;; C-c , v : 図の生涯画面を表示する（https://cacoo.com/diagrams/xxxxx）
 ;; C-c , V : ローカルの図を外部ビューアーで開く
 
+;; * カーソールが編集中の図に対して
+;; C-c , g : リロードとテキストに戻すのを切り替える
+;;           →動的生成図の編集に便利
+
 ;; * Cacooの機能に対して
 ;; C-c , N : 新規図の作成 （https://cacoo.com/diagrams/new）
 ;; C-c , l : 図の一覧 （https://cacoo.com/diagrams/）
@@ -682,17 +686,20 @@
            (cacoo:load-diagram-local data force-reload)
            pos-end)))))))
 
+(defvar cacoo:no-side-effects nil) ; 内部管理用：画像の生成が必要ない場合はt
+
 (defun cacoo:revert-next-diagram ()
-  (cacoo:do-next-diagram
-   (lambda (data)
-     (let ((mod (buffer-modified-p)))
-       (remove-text-properties 
-        (cacoo:$img-start data) (cacoo:$img-end data) 
-        '(display nil mouse-face nil help-echo nil keymap nil))
-       (cacoo:display-diagram-overlay-remove
-        (cacoo:$img-start data) (cacoo:$img-end data))
-       (set-buffer-modified-p mod))
-     (cacoo:$img-end data))))
+  (let ((cacoo:no-side-effects t)) ; 画像などを生成させない
+    (cacoo:do-next-diagram
+     (lambda (data)
+       (let ((mod (buffer-modified-p)))
+         (remove-text-properties 
+          (cacoo:$img-start data) (cacoo:$img-end data) 
+          '(display nil mouse-face nil help-echo nil keymap nil))
+         (cacoo:display-diagram-overlay-remove
+          (cacoo:$img-start data) (cacoo:$img-end data))
+         (set-buffer-modified-p mod))
+       (cacoo:$img-end data)))))
 
 (defun cacoo:do-click-link ()
   (interactive)
@@ -770,6 +777,22 @@
   (cacoo:async-reset-counter)
   (save-excursion
     (cacoo:load-next-diagram t)))
+
+(defun cacoo:reload-or-revert-current-diagram-command ()
+  (interactive)
+  ;;カーソールのある図をリロードする
+  ;;(画像マーカーの先頭に移動してリロード)
+  (cacoo:async-reset-counter)
+  (save-excursion
+    (cond
+     ((get-text-property (point) 'display)
+      (end-of-line)
+      (cacoo:navi-prev-diagram-command)
+      (cacoo:revert-next-diagram))
+     (t
+      (end-of-line)
+      (cacoo:navi-prev-diagram-command)
+      (cacoo:load-next-diagram t)))))
 
 (defun cacoo:reload-all-diagrams-command ()
   (interactive)
@@ -859,9 +882,8 @@
 (defun cacoo:navi-next-diagram-command ()
   (interactive)
   (end-of-line)
-  (cacoo:do-next-diagram 
-   (lambda (data) t))
-  (beginning-of-line))
+  (if (re-search-forward cacoo:img-regexp nil t)
+      (beginning-of-line)))
 
 (defun cacoo:navi-prev-diagram-command ()
   (interactive)
@@ -876,6 +898,8 @@
 
          ("C-c , r"   . cacoo:reload-next-diagram-command)
          ("C-c , R"   . cacoo:reload-all-diagrams-command)
+
+         ("C-c , g"   . cacoo:reload-or-revert-current-diagram-command)
 
          ("C-c , t"   . cacoo:revert-next-diagram-command)
          ("C-c , T"   . cacoo:revert-all-diagrams-command)
@@ -1101,23 +1125,24 @@
               "%OUT%" out text t) t))
 
 (defun cacoo:plugin-cmd-exec (cmd output-path text)
-  (let* ((tmpfile (format "tmp_%s.txt" filename))
-         (rcmd  (cacoo:plugin-cmd-replace-io cmd  tmpfile output-path))
-         (rtext (cacoo:plugin-cmd-replace-io text tmpfile output-path))
-         (tmpbuf (get-buffer-create (cacoo:uid output-path)))
-         (cols (split-string rcmd)) msg)
-    (unwind-protect
-        (progn
-          (write-region rtext nil tmpfile)
-          (apply 'call-process (car cols) nil tmpbuf nil (cdr cols))
-          (setq msg (cacoo:buffer-string "CMD [%s]" tmpbuf))
-          (cacoo:log msg)
-          (when (cacoo:file-exists-p output-path)
-            (setq msg nil)))
-      (ignore-errors
-        (delete-file tmpfile))
-      (kill-buffer tmpbuf))
-    msg))
+  (unless cacoo:no-side-effects ; t の時は何もしない
+    (let* ((tmpfile (format "tmp_%s.txt" filename))
+           (rcmd  (cacoo:plugin-cmd-replace-io cmd  tmpfile output-path))
+           (rtext (cacoo:plugin-cmd-replace-io text tmpfile output-path))
+           (tmpbuf (get-buffer-create (cacoo:uid output-path)))
+           (cols (split-string rcmd)) msg)
+      (unwind-protect
+          (progn
+            (write-region rtext nil tmpfile)
+            (apply 'call-process (car cols) nil tmpbuf nil (cdr cols))
+            (setq msg (cacoo:buffer-string "CMD [%s]" tmpbuf))
+            (cacoo:log msg)
+            (when (cacoo:file-exists-p output-path)
+              (setq msg nil)))
+        (ignore-errors
+          (delete-file tmpfile))
+        (kill-buffer tmpbuf))
+      msg)))
 
 ;; ** Graphviz図埋め込みのプラグイン
 ;; [img:DOT (filename) (size:省略可)]
