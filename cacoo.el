@@ -996,9 +996,9 @@
 ;; (長文)
 ;; <<<
 ;; urlの中の <<< がヒアドキュメントのようにURLエンコーディングして埋め込まれる
-(setq cacoo:plugin-long-url-regexp
+(defvar cacoo:plugin-long-url-regexp
       "^\\* \\([^ \n\r\t]+\\) \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
-(setq cacoo:plugin-long-url-terminator "<<<")
+(defvar cacoo:plugin-long-url-terminator "<<<")
 
 (defun cacoo:plugin-long-url (start end content)
   (when (string-match cacoo:plugin-long-url-regexp content)
@@ -1052,7 +1052,7 @@
 ;; UML記述 (http://yuml.me/)
 ;; <<<
 
-(setq cacoo:plugin-class-regexp "^UML \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+(defvar cacoo:plugin-class-regexp "^UML \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
 
 (defun cacoo:plugin-class-diagram (start end content)
   (when (string-match cacoo:plugin-class-regexp content)
@@ -1067,7 +1067,7 @@
 ;; シーケンス図記述 (http://www.websequencediagrams.com/)
 ;; <<<
 
-(setq cacoo:plugin-seq-regexp "SEQ \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+(defvar cacoo:plugin-seq-regexp "SEQ \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
 
 (defun cacoo:plugin-seq-diagram (start end content)
   (when (string-match cacoo:plugin-seq-regexp content)
@@ -1084,9 +1084,9 @@
 ;; commandや書き出し文字列の中の %IN% がテンポラリファイル名、
 ;; %OUT%が出力ファイル名に入れ替わる。
 
-(setq cacoo:plugin-cmd-regexp
+(defvar cacoo:plugin-cmd-regexp
       "^CMD '\\([^']+\\)' \\([^ \t\r\n]+\\)\\( [0-9]+\\)?")
-(setq cacoo:plugin-cmd-terminator "<<<")
+(defvar cacoo:plugin-cmd-terminator "<<<")
 
 (defun cacoo:plugin-cmd (start end content)
   (when (string-match cacoo:plugin-cmd-regexp content)
@@ -1149,7 +1149,7 @@
 ;; dot記述 (http://www.graphviz.org/)
 ;; <<<
 
-(setq cacoo:plugin-dot-regexp "DOT \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+(defvar cacoo:plugin-dot-regexp "DOT \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
 
 (defun cacoo:plugin-dot-diagram (start end content)
   (when (string-match cacoo:plugin-dot-regexp content)
@@ -1158,12 +1158,14 @@
       (cacoo:plugin-cmd-gen 
        start end content "dot -Tpng %IN% -o %OUT%" filename size))))
 
-;; プラグイン登録（追加する場合はpushするとか）
-(setq cacoo:plugins '(cacoo:plugin-long-url 
-                      cacoo:plugin-class-diagram
-                      cacoo:plugin-seq-diagram
-                      cacoo:plugin-dot-diagram
-                      cacoo:plugin-cmd))
+;; プラグイン登録
+(setq cacoo:plugins
+      (append '(cacoo:plugin-long-url 
+                cacoo:plugin-class-diagram
+                cacoo:plugin-seq-diagram
+                cacoo:plugin-dot-diagram
+                cacoo:plugin-cmd)
+              cacoo:plugins))
 
 ;; for test
 
