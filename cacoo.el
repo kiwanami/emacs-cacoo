@@ -956,9 +956,9 @@
 
 (defvar cacoo:minor-mode-menu-spec
 '("Cacoo"
-    ["Display all diagrams" cacoo:display-all-diagrams-command :active t :visible t]
-    ["Revert all diagrams" cacoo:revert-all-diagrams-command  :active t :visible t]
-    ["Reload all diagrams" cacoo:reload-all-diagrams-command  :active t :visible t]
+    ["Display all diagrams" cacoo:display-all-diagrams-command t]
+    ["Revert all diagrams" cacoo:revert-all-diagrams-command t]
+    ["Reload all diagrams" cacoo:reload-all-diagrams-command t]
     "----"
     ["Display a diagram" cacoo:display-next-diagram-command t]
     ["Revert a diagram" cacoo:revert-next-diagram-command t]
