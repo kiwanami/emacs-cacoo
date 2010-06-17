@@ -104,7 +104,8 @@
 ;; (setq browse-url-generic-program "open")
 
 ;; cacoo:img-regexp, cacoo:img-pattern を変更することで、Wiki記法などに
-;; あわせることができます。
+;; あわせることができます。cacoo:img-regexp は正規表現文字列のリストに
+;; もできますので、いくつかの記法を登録しておくことが出来ます。
 
 ;; キャッシュ用のディレクトリ名は cacoo:img-dir で指定します。いちいち
 ;; ディレクトリ作成で確認が必要なければ、 cacoo:img-dir-ok を t に設定
