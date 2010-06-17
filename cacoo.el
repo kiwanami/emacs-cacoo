@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.3
+;; Version: 1.4
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -131,6 +131,10 @@
 
 ;;; 更新履歴
 
+;; Revision 1.4  2010/06/17  sakurai
+;; cacoo:img-regexpを複数指定できるように修正
+;; hatena fotolifeのプラグイン追加
+;; 
 ;; Revision 1.3  2010/05/10  sakurai
 ;; プラグインの仕組み追加
 ;; URL生成プラグイン追加
@@ -162,7 +166,7 @@
 (defvar cacoo:view-url (concat cacoo:base-url "%KEY%"))
 (defvar cacoo:list-url cacoo:base-url)
 
-(defvar cacoo:img-regexp "\\[img:\\(.*\\)\\]$") ; 本文から画像に置き換える文字列を取ってくる正規表現
+(defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]$") ; 本文から画像に置き換える文字列を取ってくる正規表現
 (defvar cacoo:img-pattern "[img:%s]") ; 画像として挿入する文字列
 (defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)") ; URLからCacooの画像のKeyを取ってくる正規表現
 
@@ -632,9 +636,45 @@
      (cacoo:$img-start data) (cacoo:$img-end data))
     (set-buffer-modified-p mod)))
 
+(defun cacoo:image-search-forward ()
+  (cacoo:image-search))
+
+(defun cacoo:image-search-backward ()
+  (cacoo:image-search t))
+
+(defun cacoo:image-search (&optional backward)
+  ;;バッファ上のポイント位置以降の画像のテキストパターンを
+  ;;re-search-forward（もしくはbackwardがnil以外の場合re-search-backward）で検索する。
+  ;;cacoo:img-regexpが文字列の場合は普通に re-search-forward する。
+  ;;cacoo:img-regexpがリストの場合、複数のパターンが入っているものと見
+  ;;なして、一番近所のポイント位置を返す。
+  (let ((f (if backward 're-search-backward 're-search-forward))
+        (cmp (if backward '> '<)))
+    (cond
+     ((stringp cacoo:img-regexp)
+      (funcall f cacoo:img-regexp nil t))
+     ((listp cacoo:img-regexp)
+      (loop for re in cacoo:img-regexp
+            with val = nil ; (pos . match-data)
+            do
+            (save-excursion
+              (let ((pos (funcall f re nil t)))
+                (when pos
+                  (when (or (null val) (funcall cmp pos (car val)))
+                    (setq val (cons pos (match-data)))))))
+            finally return
+            (progn 
+              (if val 
+                  (progn
+                    (set-match-data (cdr val))
+                    (goto-char (car val))
+                    (car val))))))
+     (t
+      (error "cacoo:img-regexp is not regexp pattern. [%s]" cacoo:img-regexp)))))
+
 (defun cacoo:do-next-diagram (action)
   (cond
-   ((re-search-forward cacoo:img-regexp nil t)
+   ((cacoo:image-search-forward)
     (let ((start (match-beginning 0))
           (end (match-end 0))
           (content (match-string 1)) data)
@@ -861,7 +901,7 @@
   (let (error-message)
     (save-excursion
       (cond
-       ((re-search-forward cacoo:img-regexp)
+       ((cacoo:image-search-forward)
         (let* ((line (match-string 0))
                (url (car (split-string (match-string 1) "[ \t]")))
                (key (cacoo:get-key-from-url url))
@@ -882,12 +922,12 @@
 (defun cacoo:navi-next-diagram-command ()
   (interactive)
   (end-of-line)
-  (if (re-search-forward cacoo:img-regexp nil t)
+  (if (cacoo:image-search-forward)
       (beginning-of-line)))
 
 (defun cacoo:navi-prev-diagram-command ()
   (interactive)
-  (if (re-search-backward cacoo:img-regexp nil t)
+  (if (cacoo:image-search-backward)
       (beginning-of-line)))
 
 (defvar cacoo-minor-mode-keymap
@@ -1158,13 +1198,48 @@
       (cacoo:plugin-cmd-gen 
        start end content "dot -Tpng %IN% -o %OUT%" filename size))))
 
+;; ** はてなフォトライフ記法のプラグイン
+;; [f:id:(hatena id):(image id)(ext):image]
+;; はてなフォトライフ記法の画像を取ってくるプラグイン
+;; 
+;; 使う場合は以下のように画像タグに[f:〜]を追加します。
+;; (setq cacoo:img-regexp 
+;;      '("\\[img:\\(.*\\)\\][^]\n\r]*$"
+;;        "\\[f:\\(.*\\)\\][^]\n\t]*$"))
+;; 
+
+(defvar cacoo:plugin-hatena-fotolife-regexp
+  "^\\id:\\([^:]+\\):\\([0-9]+\\)\\([jpg]\\):image")
+
+(defun cacoo:plugin-hatena-fotolife (start end content)
+  (when (string-match cacoo:plugin-hatena-fotolife-regexp content)
+    (let* ((hatena-id (match-string 1 content))
+           (image-id (match-string 2 content))
+           (ext-id (match-string 3 content))
+           (date-id (substring image-id 0 8))
+           (ext-name 
+            (cond
+             ((equal "j" ext-id) "jpg")
+             ((equal "p" ext-id) "png")
+             ((equal "g" ext-id) "gif")
+             (t (error "unknown ext-id [%s]" ext-id))))
+           (url (format "http://f.hatena.ne.jp/images/fotolife/k/%s/%s/%s.%s" 
+                        hatena-id date-id image-id ext-name))
+           (filename (format "hatena-%s-%s.%s" hatena-id image-id ext-name)))
+      (make-cacoo:$img
+       :url url :start start :end end
+       :cached-file (cacoo:get-cache-path filename)
+       :resized-file (cacoo:get-resize-path filename)
+       :size cacoo:max-size))))
+
 ;; プラグイン登録
 (setq cacoo:plugins
       (append '(cacoo:plugin-long-url 
                 cacoo:plugin-class-diagram
                 cacoo:plugin-seq-diagram
                 cacoo:plugin-dot-diagram
-                cacoo:plugin-cmd)
+                cacoo:plugin-cmd
+                cacoo:plugin-hatena-fotolife)
               cacoo:plugins))
 
 ;; for test
