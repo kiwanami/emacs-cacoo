@@ -172,7 +172,7 @@
 (defvar cacoo:view-url (concat cacoo:base-url "%KEY%"))
 (defvar cacoo:list-url cacoo:base-url)
 
-(defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]$") ; 本文から画像に置き換える文字列を取ってくる正規表現
+(defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]*$") ; 本文から画像に置き換える文字列を取ってくる正規表現
 (defvar cacoo:img-pattern "[img:%s]") ; 画像として挿入する文字列
 (defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)") ; URLからCacooの画像のKeyを取ってくる正規表現
 
