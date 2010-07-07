@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.4
+;; Version: 1.5
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -132,6 +132,10 @@
 
 ;;; 更新履歴
 
+;; Revision 1.5  2010/07/05  sakurai
+;; URLにパラメーターが付いていた場合は省くように修正。
+;; cacoo:browser-function でCacooを起動するブラウザを指定できるように修正
+;; 
 ;; Revision 1.4  2010/06/17  sakurai
 ;; cacoo:img-regexpを複数指定できるように修正
 ;; hatena fotolifeのプラグイン追加
@@ -157,6 +161,7 @@
 ;;; Code:
 
 (eval-when-compile (require 'cl))
+(require 'url-file)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customize
@@ -267,8 +272,12 @@
              (cacoo:get-cache-dir))))
 
 (defun cacoo:get-filename-from-url (url)
-  (if (string-match "[^/]*$" url) ; URLがパラメーターの時は怪しい
-      (match-string 0 url)))
+  (cond
+   ((string-match "^http" url)
+    (url-file-nondirectory url))
+   (t
+    (if (string-match "[^/]*$" url)
+        (match-string 0 url)))))
 
 (defun cacoo:file-exists-p (file)
   (and (file-exists-p file)
@@ -453,7 +462,7 @@
        (resize-path (cacoo:$img-resized-file data))
        (data data))
     (cond
-     ((= 0 org-size) 
+     ((= 0 org-size)
       (setf (cacoo:$img-error data) "Can not transform this image by convert.")
       (cacoo:display-diagram-by-text data))
      ((and (not force-reload) 
