@@ -97,10 +97,10 @@
 
 ;;; カスタマイズなど
 
-;; ブラウザーはEmacsで設定してあるデフォルトブラウザーを使います。
-;; browse-url-browser-function 周辺を設定してみてください。
+;; ブラウザは cacoo:browser-function で設定してあるものを使います。
+;; デフォルトは browse-url-browser-function の値です。
 ;; 例：Macでsafariを使う場合
-;; (setq browse-url-browser-function 'browse-url-generic)
+;; (setq cacoo:browser-function 'browse-url-generic)
 ;; (setq browse-url-generic-program "open")
 
 ;; cacoo:img-regexp, cacoo:img-pattern を変更することで、Wiki記法などに
@@ -180,6 +180,7 @@
 (defvar cacoo:png-background nil) ; 透過PNGの背景色がおかしい場合にセット
 
 (defvar cacoo:translation-exts '("eps" "ps")) ; PNGに変換する拡張子のリスト
+(defvar cacoo:browser-function browse-url-browser-function) ; Cacooを起動するbrowser
 
 (defvar cacoo:plugins nil) ; プラグイン関数シンボルのリスト
 
@@ -873,15 +874,19 @@
   (save-excursion
     (cacoo:load-next-diagram)))
 
+(defun cacoo:open-browser (url)
+  (let ((browse-url-browser-function cacoo:browser-function))
+    (browse-url url)))
+
 (defun cacoo:create-new-diagram-command ()
   (interactive)
   ;;ブラウザで新規図を開く
-  (browse-url cacoo:new-url))
+  (cacoo:open-browser cacoo:new-url))
 
 (defun cacoo:open-diagram-list-command ()
   (interactive)
   ;;ブラウザで図の一覧を開く
-  (browse-url cacoo:list-url))
+  (cacoo:open-browser cacoo:list-url))
 
 (defun cacoo:get-key-from-url (url)
   (if (string-match cacoo:key-regexp url)
@@ -907,9 +912,7 @@
                (url (car (split-string (match-string 1) "[ \t]")))
                (key (cacoo:get-key-from-url url))
                (open-url (cacoo:make-url tmpl-url key)))
-          (if open-url 
-              (browse-url open-url)
-            (browse-url url))))
+          (cacoo:open-browser (or open-url url))))
        (t
         (setq error-message "URL is not found."))))
     (when error-message 
