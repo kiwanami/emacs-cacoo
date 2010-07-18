@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.5
+;; Version: 1.6
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -128,10 +128,13 @@
 
 ;;; 制限事項
 
-;; 同一バッファ内で、同一画像を複数回表示することができません。
+;; 同一バッファ内で、同一画像ファイルを複数回表示することができません。
 
 ;;; 更新履歴
 
+;; Revision 1.6  2010/07/19  sakurai
+;; SVGプラグイン追加
+;; 
 ;; Revision 1.5  2010/07/05  sakurai
 ;; URLにパラメーターが付いていた場合は省くように修正。
 ;; cacoo:browser-function でCacooを起動するブラウザを指定できるように修正
@@ -1245,6 +1248,38 @@
        :resized-file (cacoo:get-resize-path filename)
        :size cacoo:max-size))))
 
+;; ** SVG
+;; [img:SVG (filename) (size:省略可)]
+;; SVG記述
+;; <<<
+
+(defvar cacoo:plugin-svg-regexp "SVG \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+
+(defun cacoo:plugin-svg (start end content)
+  (when (string-match cacoo:plugin-svg-regexp content)
+    (let ((filename (match-string 1 content))
+          (size (match-string 2 content))
+          ret)
+      (save-excursion
+        (goto-char end)
+        (when (re-search-forward 
+               cacoo:plugin-cmd-terminator)
+          (let* ((t-start (match-beginning 0))
+                 (t-end (match-end 0))
+                 (text (buffer-substring (1+ end) (1- t-start)))
+                 (output-path (cacoo:get-cache-path filename)))
+            (write-region text nil output-path)
+            (setq ret
+                  (make-cacoo:$img
+                   :url 'generated :start start :end t-end
+                   :cached-file output-path
+                   :resized-file (cacoo:get-resize-path filename)
+                   :size (cacoo:aif 
+                          size
+                          (string-to-number it)
+                          cacoo:max-size))))))
+    ret)))
+
 ;; プラグイン登録
 (setq cacoo:plugins
       (append '(cacoo:plugin-long-url 
@@ -1252,8 +1287,10 @@
                 cacoo:plugin-seq-diagram
                 cacoo:plugin-dot-diagram
                 cacoo:plugin-cmd
-                cacoo:plugin-hatena-fotolife)
+                cacoo:plugin-hatena-fotolife
+                cacoo:plugin-svg)
               cacoo:plugins))
+
 
 ;; for test
 
@@ -1261,6 +1298,7 @@
 ;; (setq cacoo:png-background "white")
 ;; (setq cacoo:debug t)
 ;; (setq cacoo:debug nil)
+;; (setq cacoo:plugins nil)
 
 (provide 'cacoo)
 ;;; cacoo.el ends here
