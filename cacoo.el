@@ -165,6 +165,7 @@
 
 (eval-when-compile (require 'cl))
 (require 'url-file)
+(require 'el-deferred)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customize
@@ -293,105 +294,6 @@
              (when (file-exists-p it)
                (delete-file it))))
 
-(defvar cacoo:uid-count 0) ; 非同期プロセス作成用
-
-(defun cacoo:uid (name)
-  (incf cacoo:uid-count)
-  (format " *Cacoo:%s:%i*" name cacoo:uid-count))
-
-(defvar cacoo:async-counter-start  0) ; 開始非同期プロセスの数
-(defvar cacoo:async-counter-finish 0) ; 終了非同期プロセスの数
-(defvar cacoo:async-counter-error  0) ; エラー終了非同期プロセスの数
-(make-variable-buffer-local 'cacoo:async-counter-start)
-(make-variable-buffer-local 'cacoo:async-counter-finish)
-(make-variable-buffer-local 'cacoo:async-counter-error)
-
-(defun cacoo:async-reset-counter ()
-  (setq cacoo:async-counter-start  0
-        cacoo:async-counter-finish 0
-        cacoo:async-counter-error  0)
-  (cacoo:log "ASYNC COUNTER RESET"))
-
-(defun cacoo:async-start ()
-  (incf cacoo:async-counter-start)
-  (cacoo:async-display-message))
-
-(defun cacoo:async-finish ()
-  (incf cacoo:async-counter-finish)
-  (cacoo:async-display-message))
-
-(defun cacoo:async-finish-error ()
-  (incf cacoo:async-counter-finish)
-  (incf cacoo:async-counter-error)
-  (cacoo:async-display-message))
-
-(defun cacoo:async-display-message ()
-  (let ((error-message
-         (if (< 0 cacoo:async-counter-error)
-             (format "  %i errors" cacoo:async-counter-error) "")))
-    (message 
-     (if (eql cacoo:async-counter-finish cacoo:async-counter-start)
-         "Cacoo tasks are done. (%i/%i%s)"
-       "Cacoo processing.. (%i/%i%s)" )
-     cacoo:async-counter-finish cacoo:async-counter-start
-     error-message)))
-
-(defun cacoo:async (&rest procs)
-  (cacoo:async-gen 'cacoo:async-start (current-buffer) procs))
-
-(defun cacoo:async-gen (args buf procs)
-  ;;procsを実行して回る
-  ;;エラーが出たら中断
-  (when procs
-    (when (eq args 'cacoo:async-start) 
-      (cacoo:async-start))
-    (lexical-let*
-        ((proc (car procs)) (next-procs (cdr procs))
-         (name (car proc)) (cmds (cadr proc))
-         (ok (nth 2 proc)) (ng (nth 3 proc))
-         (tag (car cmds)) (buf buf)
-         (tmpbuf (get-buffer-create 
-                  (format " *Cacoo:temp:%s*" name)))
-         (rcmds (if (and tag (symbolp tag) (eq tag 'lambda))
-                    (funcall cmds args) cmds))
-         (proc
-          (apply 'start-process (cacoo:uid name) tmpbuf rcmds))
-         (dcount cacoo:uid-count))
-      (cacoo:log "ASYNC-S %i : %s %s" dcount tag rcmds)
-      (set-process-sentinel
-       proc
-       (lambda (proc event)
-         (with-current-buffer buf
-           (cacoo:log "ASYNC-E %i : %s %s" dcount tag event)
-           (cond
-            ((string-match "exited abnormally" event)
-             (let ((msg (if (buffer-live-p tmpbuf)
-                            (cacoo:buffer-string "%s" tmpbuf)
-                          (concat "NA:" name))))
-               (cacoo:log "ASYNC-E %i [%s]" dcount msg)
-               (kill-buffer tmpbuf)
-               (funcall ng msg)
-               (cacoo:async-finish-error)))
-            ((equal event "finished\n")
-             (let* ((msg (prog1 
-                             (if (buffer-live-p tmpbuf)
-                                 (cacoo:buffer-string "%s" tmpbuf)
-                               (concat "NA:" name))
-                           (kill-buffer tmpbuf)))
-                    (ret (funcall ok msg)))
-               (cacoo:log "ASYNC-E %i [%s]" dcount msg)
-               (if next-procs
-                   (cacoo:async-gen ret buf next-procs)
-                 (cacoo:async-finish)))))))))))
-
-(defun cacoo:proc (name commands ok ng)
-  ;; name プロセス、バッファを特定する名前
-  ;; commands コマンドラインで実行するものの文字列リスト
-  ;; →lambdaの場合は前のプロセスのokの実行結果を引数にしてfuncallする
-  ;; ok プロセス正常終了時に呼ばれる。引数：出力文字列
-  ;; ng プロセス異常終了時に呼ばれる。引数：出力文字列
-  (list name commands ok ng))
-
 (defun cacoo:load-diagram-remote(data &optional force-reload)
   (lexical-let* ((data data) (force-reload force-reload)
                  (org-path (cacoo:$img-cached-file data))
@@ -402,20 +304,21 @@
       (cacoo:resize-diagram data force-reload)
       t)
      (t
-      (cacoo:async
-       (cacoo:proc
-        org-path
-        (list "wget" "-q" 
-              "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
-              "-O" org-path url)
-        (lambda (msg)
-          (if (cacoo:file-exists-p org-path)
-              (cacoo:resize-diagram data force-reload)
+      (deferred:$
+        (deferred:process
+          "wget" "-q" 
+          "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
+          "-O" org-path url)
+        (deferred:nextc it
+          (lambda (msg)
+            (if (cacoo:file-exists-p org-path)
+                (cacoo:resize-diagram data force-reload)
+              (setf (cacoo:$img-error data) msg)
+              (cacoo:display-diagram-by-text data))))
+        (deferred:error it
+          (lambda (msg)
             (setf (cacoo:$img-error data) msg)
-            (cacoo:display-diagram-by-text data)))
-        (lambda (msg)
-          (setf (cacoo:$img-error data) msg)
-          (cacoo:display-diagram-by-text data))))
+            (cacoo:display-diagram-by-text data))))
       t))))
 
 (defun cacoo:get-local-path-from-url(url)
@@ -499,21 +402,22 @@
         (copy-file org-path resize-path t t))
       (cacoo:display-diagram data))
      (t
-      (cacoo:async
-       (cacoo:proc
-        org-path
-        (list "convert" "-resize" (format "%ix%i" size size)
-              "-transparent-color" "#ffffff"
-              org-path (concat (file-name-extension resize-path)
-                               ":" resize-path))
-        (lambda (msg)
-          (if (cacoo:file-exists-p resize-path)
-              (cacoo:display-diagram data)
-            (setf (cacoo:$img-error data) msg)
-            (cacoo:display-diagram-by-text data)))
-        (lambda (msg)
-          (setf (cacoo:$img-error data) msg)
-          (cacoo:display-diagram-by-text data))))))
+      (deferred:$
+       (deferred:process
+         "convert" "-resize" (format "%ix%i" size size)
+         "-transparent-color" "#ffffff"
+         org-path (concat (file-name-extension resize-path)
+                          ":" resize-path))
+       (deferred:nextc it
+         (lambda (msg)
+           (if (cacoo:file-exists-p resize-path)
+               (cacoo:display-diagram data)
+             (setf (cacoo:$img-error data) msg)
+             (cacoo:display-diagram-by-text data))))
+       (deferred:error it
+         (lambda (msg)
+           (setf (cacoo:$img-error data) msg)
+           (cacoo:display-diagram-by-text data))))))
     t))
 
 (defun cacoo:resize-diagram-for-fillbg (data not-resizep)
@@ -524,52 +428,44 @@
        (resize-path (cacoo:$img-resized-file data))
        (size (cacoo:$img-size data))
        (resize-size nil)
-       (tmpfile (cacoo:get-background-img-path org-path))
-       (err (lambda (errmsg) 
-              `(lambda (msg) 
-                 (setf (cacoo:$img-error ,data)
-                       (format ,(format "%s. \n%%s" errmsg) msg))
-                 (cacoo:display-diagram-by-text ,data)))) procs)
-    (setq procs
-          (list
-           (cacoo:proc ; 縮小した画像のサイズを取得
-            org-path
-            (list "identify" "-format" "%wx%h" resize-path)
-            'identity ; <- 次の実行で使う
-            (funcall err "Could not identify"))
-           (cacoo:proc ; 縮小した画像と同じサイズの背景画像を準備
-            org-path
-            (lambda (args) (list "convert" "-size" args
-                                 (concat "xc:" cacoo:png-background) 
-                                 tmpfile))
-            'identity
-            (funcall err "Could not make bgimage"))
-           (cacoo:proc ; 背景に重ねる
-            org-path
-            (list "convert" tmpfile resize-path "-flatten" resize-path)
-            (lambda (msg)
-              (if (cacoo:file-exists-p resize-path)
-                  (cacoo:display-diagram data)
-                (setf (cacoo:$img-error data)
-                      (format "Could not compose. \n%s" msg))
-                (cacoo:display-diagram-by-text data))
-              (when (file-exists-p tmpfile)
-                (delete-file tmpfile)))
-            (funcall err "Could not compose"))))
-    (if (and not-resizep
-             (equal (file-name-extension org-path)
-                    (file-name-extension resize-path)))
-            (ignore-errors ; 十分画像のサイズが小さいときはコピー
-              (copy-file org-path resize-path t t))
-        (setq procs  ; 大きい画像は縮小する（タスクの先頭に追加）
-              (cons 
-               (cacoo:proc
-                org-path
-                (list "convert" org-path "-resize" (format "%ix%i" size size)
-                      (concat (file-name-extension resize-path) ":" resize-path))
-                'identity
-                (funcall err "Could not convert")) procs)))
-    (cacoo:async-gen 'cacoo:async-start (current-buffer) procs)))
+       (tmpfile (cacoo:get-background-img-path org-path)))
+    (deferred:$
+      (deferred:next
+        (lambda (x)
+          (cond
+           ((and not-resizep
+                 (equal (file-name-extension org-path)
+                        (file-name-extension resize-path)))
+              (ignore-errors ; 画像のサイズが小さいときはコピー
+                (copy-file org-path resize-path t t))
+              nil)
+           (t ; 通常はリサイズする
+            (deferred:process
+              "convert" org-path "-resize" (format "%ix%i" size size)
+              (concat (file-name-extension resize-path) ":" resize-path))))))
+      (deferred:processc it ; 縮小した画像のサイズを取得
+        "identify" "-format" "%wx%h" resize-path)
+      (deferred:nextc it ; 縮小した画像と同じサイズの背景画像を準備
+        (lambda (x) (deferred:process "convert" "-size" x
+                      (concat "xc:" cacoo:png-background) 
+                      tmpfile)))
+      (deferred:processc it ; 背景に重ねる
+        "convert" tmpfile resize-path "-flatten" resize-path)
+      (deferred:nextc it
+        (lambda (msg)
+          (if (cacoo:file-exists-p resize-path)
+              (cacoo:display-diagram data)
+            (setf (cacoo:$img-error data)
+                  (format "Could not compose. \n%s" msg))
+            (cacoo:display-diagram-by-text data))
+          (when (file-exists-p tmpfile)
+            (delete-file tmpfile))))
+      (deferred:error it
+        (lambda (x) 
+          (setf (cacoo:$img-error data)
+                (format "Resize error : %s" x))
+          (cacoo:display-diagram-by-text data)))
+      )))
 
 (defun cacoo:buffer-string (format buf)
   (format format
@@ -812,7 +708,6 @@
 (defun cacoo:view-local-cache-next-diagram-command () 
   (interactive)
   ;;原寸大の画像をローカルの環境で参照する
-  (cacoo:async-reset-counter)
   (cacoo:do-next-diagram
    (lambda (data)
      (cacoo:view-original-cached-image 
@@ -828,7 +723,6 @@
 (defun cacoo:reload-next-diagram-command ()
   (interactive)
   ;;カーソール直後の図をリロードする
-  (cacoo:async-reset-counter)
   (save-excursion
     (cacoo:load-next-diagram t)))
 
@@ -836,7 +730,6 @@
   (interactive)
   ;;カーソールのある図をリロードする
   ;;(画像マーカーの先頭に移動してリロード)
-  (cacoo:async-reset-counter)
   (save-excursion
     (cond
      ((get-text-property (point) 'display)
@@ -851,7 +744,6 @@
 (defun cacoo:reload-all-diagrams-command ()
   (interactive)
   ;;バッファ内のすべての図を更新する
-  (cacoo:async-reset-counter)
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:load-next-diagram t))))
@@ -873,7 +765,6 @@
   (interactive)
   ;;バッファ内のすべての図を表示する
   ;;キャッシュがあればそれを使う
-  (cacoo:async-reset-counter)
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:load-next-diagram))))
@@ -882,7 +773,6 @@
   (interactive)
   ;;カーソール直後の図を表示する
   ;;キャッシュがあればそれを使う
-  (cacoo:async-reset-counter)
   (save-excursion
     (cacoo:load-next-diagram)))
 
