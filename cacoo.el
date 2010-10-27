@@ -30,7 +30,9 @@
 ;;; Installation:
 
 ;; 必要なもの、環境
-;; wget, ImageMagick(convert, identify, display)
+;; - deferred.el (http://github.com/kiwanami/emacs-deferred/raw/master/deferred.el)
+;; - concurrent.el (http://github.com/kiwanami/emacs-deferred/raw/master/concurrent.el)
+;; - wget, ImageMagick(convert, identify, display)
 
 ;; ロードパスに cacoo.el を置き、以下のように呼び出し用のコードを
 ;; .emacs などに追加してください。以下の例では、Altキーを押しながら「-」
@@ -132,6 +134,9 @@
 
 ;;; 更新履歴
 
+;; Revision 1.7  2010/10/27  sakurai
+;; deferred.el へ書き直し
+;; 
 ;; Revision 1.6  2010/07/19  sakurai
 ;; SVGプラグイン追加
 ;; 
@@ -165,7 +170,7 @@
 
 (eval-when-compile (require 'cl))
 (require 'url-file)
-(require 'el-deferred)
+(require 'deferred)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customize
@@ -1075,7 +1080,7 @@
     (let* ((tmpfile (format "tmp_%s.txt" filename))
            (rcmd  (cacoo:plugin-cmd-replace-io cmd  tmpfile output-path))
            (rtext (cacoo:plugin-cmd-replace-io text tmpfile output-path))
-           (tmpbuf (get-buffer-create (cacoo:uid output-path)))
+           (tmpbuf (get-buffer-create (format " *cacoo-cmd:%s*" (deferred:uid))))
            (cols (split-string rcmd)) msg)
       (unwind-protect
           (progn
