@@ -163,7 +163,6 @@
 
 
 ;; * memo
-;; clear-cache
 ;; anything-integration
 ;; get image by api
 ;; plugins
@@ -374,6 +373,8 @@
 
 (defvar cacoo:image-wp-original nil)
 (defvar cacoo:image-wp-resized  nil)
+(make-variable-buffer-local 'cacoo:image-wp-original)
+(make-variable-buffer-local 'cacoo:image-wp-resized)
 
 (defun cacoo:image-wp-init ()
   (setq cacoo:image-wp-process-semaphore (cc:semaphore-create cacoo:process-num)
@@ -388,28 +389,50 @@
      cacoo:image-wp-resized  t (lambda (args) (cacoo:log "DF RSZ / %S" args)))))
 
 (defun cacoo:image-wp-get-resized-d (url size)
-  ;;ここを呼ぶ
-  ;;deferredの引数には画像ファイル名が渡ってくる
+  ;; deferredの引数には画像ファイル名が渡ってくる
   (cc:dataflow-get cacoo:image-wp-resized (cons url size)))
 
 (defun cacoo:image-wp-get-original-d (url)
-  ;;ここを呼ぶ
-  ;;deferredの引数には画像ファイル名が渡ってくる
+  ;; deferredの引数には画像ファイル名が渡ってくる
   (cc:dataflow-get cacoo:image-wp-original url))
 
 (defun cacoo:image-wp-set-resized (url size file)
-  (cc:dataflow-set cacoo:image-wp-resized (cons url size) file))
+  (cc:dataflow-set cacoo:image-wp-resized
+                   (cons (substring-no-properties url) size) file))
   
 (defun cacoo:image-wp-set-original (url file)
-  (cc:dataflow-set cacoo:image-wp-original url file))
+  (cc:dataflow-set cacoo:image-wp-original 
+                   (substring-no-properties url) file))
+
+(defun cacoo:image-wp-clear-cache (url)
+  (cacoo:aif
+      (cc:dataflow-get-sync cacoo:image-wp-original url)
+      (progn
+        (delete-file it)
+        (cc:dataflow-clear cacoo:image-wp-original url)))
+  (let ((remove-keys 
+         (loop for i in (cc:dataflow-get-avalable-pairs 
+                         cacoo:image-wp-resized)
+               for key = (car i)
+               for key-url = (car key)
+               if (string-equal url key-url)
+               collect key)))
+    (loop for i in remove-keys
+          do
+          (cacoo:aif (cc:dataflow-get-sync cacoo:image-wp-resized i)
+              (progn
+                (delete-file it)
+                (cc:dataflow-clear cacoo:image-wp-resized i))))))
+
+;;; Event handling
 
 (defun cacoo:image-wp-create-resized (args)
-  ;;画像をリサイズしてWPに追加
+  ;; イベントから呼ばれて画像をリサイズしてWPに追加
   (destructuring-bind (event ((url . size))) args
     (cacoo:resize-diagram url size)))
 
 (defun cacoo:image-wp-create-original (args)
-  ;; 画像を取ってきてWPに追加
+  ;; イベントから呼ばれて画像を取ってきてWPに追加
   (destructuring-bind (event (url)) args
     (cacoo:fix-directory)
     (cond
@@ -424,22 +447,24 @@
 
 (defun cacoo:load-diagram-remote(url)
   (cacoo:log ">> cacoo:load-diagram-remote : %s" url)
-  (lexical-let* ((org-path (cacoo:get-cache-path-from-url url))
+  (lexical-let* ((cache-path (cacoo:get-cache-path-from-url url))
                  (url url))
     (cond
-     ((cacoo:file-exists-p org-path)
-      (cacoo:image-wp-set-original url org-path))
+     ((cacoo:file-exists-p cache-path)
+      (cacoo:log ">>   found cache file : %s" cache-path)
+      (cacoo:image-wp-set-original url cache-path))
      (t
+      (cacoo:log ">>   http request : %s" url)
       (deferred:$
         (cacoo:image-wp-acquire-semaphore-d)
         (deferred:processc it
           "wget" "-q" 
           "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
-          "-O" org-path url)
+          "-O" cache-path url)
         (deferred:nextc it
           (lambda (msg)
             (cacoo:image-wp-set-original 
-             url (if (cacoo:file-exists-p org-path) org-path
+             url (if (cacoo:file-exists-p cache-path) cache-path
                    (cons 'error msg)))))
         (deferred:error it
           (lambda (msg)
@@ -453,6 +478,7 @@
          (cache-path (cacoo:get-cache-path-from-url filename)))
     (cond
      ((cacoo:file-exists-p cache-path)
+      (cacoo:log ">>   found cache file : %s" cache-path)
       (cacoo:image-wp-set-original url cache-path))
      (t
       (deferred:$
@@ -470,6 +496,7 @@
 
 (defun cacoo:copy-file-d (d from-path to-path)
   (unless d (setq d (deferred:next 'identity)))
+  (cacoo:log ">>   local copy : %s" from-path)
   (lexical-let ((from-path from-path) (to-path to-path))
     (deferred:$
       (if cacoo:copy-by-command
@@ -509,6 +536,7 @@
                 (not-resizep (< org-size max-size)))
             (cond
              ((cacoo:file-exists-p resize-path)
+              (cacoo:log ">>   found cache file : %s" resize-path)
               (cacoo:image-wp-set-resized url max-size resize-path))
              ((= 0 org-size)
               (cacoo:image-wp-set-resized 
@@ -521,24 +549,24 @@
       (cacoo:image-wp-release-semaphore-d it))))
 
 (defun cacoo:resize-diagram-for-transparent (url max-size not-resizep)
-  (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / resize: %s" url max-size not-resizep)
+  (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / not-resize: %s" url max-size not-resizep)
   (lexical-let
       ((url url) (max-size max-size)
-       (org-path (cacoo:get-cache-path-from-url url))
+       (cache-path (cacoo:get-cache-path-from-url url))
        (resize-path (cacoo:get-resize-path-from-url url max-size)))
     (deferred:$
       (cond 
        ((and not-resizep
-             (equal (file-name-extension org-path)
+             (equal (file-name-extension cache-path)
                     (file-name-extension resize-path)))
-        (cacoo:copy-file-d nil org-path resize-path))
+        (cacoo:copy-file-d nil cache-path resize-path))
        (t
         (deferred:$
           (cacoo:image-wp-acquire-semaphore-d)
           (deferred:processc it
             "convert" "-resize" (format "%ix%i" max-size max-size)
             "-transparent-color" "#ffffff"
-            org-path (concat (file-name-extension resize-path)
+            cache-path (concat (file-name-extension resize-path)
                              ":" resize-path))
           (cacoo:image-wp-release-semaphore-d it))))
       (deferred:nextc it
@@ -549,7 +577,7 @@
         (lambda (msg) 
           (cacoo:image-wp-set-resized url max-size
            (cons 'error (format "Can not resize image %s -> %s" 
-                                org-path resize-path))))))))
+                                cache-path resize-path))))))))
 
 (defun cacoo:get-background-img-path (path)
   (expand-file-name
@@ -560,19 +588,19 @@
   (cacoo:log ">> cacoo:resize-diagram-for-fillbg : %s / %s / resize: %s" url max-size not-resizep)
   (lexical-let*
       ((url url) (max-size max-size)
-       (org-path (cacoo:get-cache-path-from-url url))
+       (cache-path (cacoo:get-cache-path-from-url url))
        (resize-path (cacoo:get-resize-path-from-url url max-size))
        resize-size 
-       (tmpfile (cacoo:get-background-img-path org-path)))
+       (tmpfile (cacoo:get-background-img-path cache-path)))
     (deferred:$
       (cond
        ((and not-resizep ; 小さい場合はコピー
-             (equal (file-name-extension org-path)
+             (equal (file-name-extension cache-path)
                     (file-name-extension resize-path)))
-        (cacoo:copy-file-d nil org-path resize-path))
+        (cacoo:copy-file-d nil cache-path resize-path))
        (t ; 通常はリサイズする
         (deferred:process
-          "convert" org-path "-resize" (format "%ix%i" max-size max-size)
+          "convert" cache-path "-resize" (format "%ix%i" max-size max-size)
           (concat (file-name-extension resize-path) ":" resize-path))))
       (deferred:processc it ; 縮小した画像のサイズを取得
         "identify" "-format" "%wx%h" resize-path)
@@ -588,7 +616,7 @@
         (lambda (msg) 
           (cacoo:image-wp-set-resized url max-size
            (cons 'error (format "Can not resize image %s -> %s" 
-                                org-path resize-path))))))))
+                                cache-path resize-path))))))))
 
 
 
@@ -674,13 +702,13 @@
 
 ;;; Error overlays
 
-(defvar cacoo:display-diagram-overlays nil) ; エラー表示用のオーバーレイ
+(defvar cacoo:display-diagram-overlays nil "[internal] a list of the overlay objects.")
 (make-variable-buffer-local 'cacoo:display-diagram-overlays)
 
 (defun cacoo:display-diagram-overlay-add (start end)
   (when
       (loop for i in cacoo:display-diagram-overlays
-            if (and ; 既存のOLとかぶってないかチェック
+            if (and ; checking current overlays
                 (< start (overlay-end i))
                 (> end (overlay-start i)))
             return nil
@@ -712,11 +740,11 @@
 ;;; Navigation
 
 (defun cacoo:image-search (&optional backward)
-  ;;バッファ上のポイント位置以降の画像のテキストパターンを
-  ;;re-search-forward（もしくはbackwardがnil以外の場合re-search-backward）で検索する。
-  ;;cacoo:img-regexpが文字列の場合は普通に re-search-forward する。
-  ;;cacoo:img-regexpがリストの場合、複数のパターンが入っているものと見
-  ;;なして、一番近所のポイント位置を返す。
+  ;; バッファ上のポイント位置以降の画像のテキストパターンを
+  ;; re-search-forward（もしくはbackwardがnil以外の場合
+  ;; re-search-backward）で検索する。cacoo:img-regexpが文字列の場合は普
+  ;; 通に re-search-forward する。cacoo:img-regexpがリストの場合、複数
+  ;; のパターンが入っているものと見なして、一番近所のポイント位置を返す。
   (let ((f (if backward 're-search-backward 're-search-forward))
         (cmp (if backward '> '<)))
     (cond
@@ -765,7 +793,7 @@
    ((cacoo:image-search-forward)
       (let* 
           ((start (match-beginning 0)) (end (match-end 0))
-           (content (match-string 1)) data)
+           (content (substring-no-properties (match-string 1))) data)
         (setq data 
               (cacoo:aif 
                   (cacoo:try-plugins start end content) it 
@@ -784,12 +812,17 @@
 (defun cacoo:revert-next-diagram ()
   (cacoo:do-next-diagram 'cacoo:display-diagram-revert))
 
+(defun cacoo:reload-next-diagram ()
+  (cacoo:do-next-diagram 
+   (lambda (data) 
+     (cacoo:image-wp-clear-cache (cacoo:$img-url data))
+     (cacoo:display-diagram data))))
+
 (defun cacoo:clear-cache-next-diagram ()
   (save-excursion
     (cacoo:do-next-diagram 
      (lambda (data) 
-       
-       ))))
+       (cacoo:image-wp-clear-cache (cacoo:$img-url data))))))
 
 (defun cacoo:clear-all-cache-files ()
   "Clear all files in the current cache directory."
@@ -847,9 +880,8 @@
 (defun cacoo:reload-next-diagram-command ()
   (interactive)
   ;;カーソール直後の図をリロードする
-  (cacoo:clear-cache-next-diagram)
   (save-excursion
-    (cacoo:load-next-diagram)))
+    (cacoo:reload-next-diagram)))
 
 (defun cacoo:reload-or-revert-current-diagram-command ()
   (interactive)
@@ -864,8 +896,7 @@
      (t
       (end-of-line)
       (cacoo:navi-prev-diagram-command)
-      (cacoo:clear-cache-next-diagram)
-      (cacoo:load-next-diagram)))))
+      (cacoo:reload-next-diagram)))))
 
 (defun cacoo:reload-all-diagrams-command ()
   (interactive)
