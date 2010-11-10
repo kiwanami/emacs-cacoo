@@ -1,13 +1,9 @@
 ;;; anything-cacoo.el
 
-
-(require 'concurrent)
+(require 'cacoo)
 (require 'json)
 
-(defvar cacoo:api-key "y6KlL0PdnxBc5QNOln7N")
-(defvar cacoo:api-url-base "https://cacoo.com/api/v1/")
-
-(defvar cacoo:api-get-num 4)
+(defvar cacoo:api-url-base "https://cacoo.com/api/v1/" "[internal] Cacoo API base URL.")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Utility Functions
@@ -52,8 +48,7 @@
    (t "")))
 
 (defvar cacoo:api-cancel-flag nil "[internal]")
-
-(defvar cacoo:get-semaphore (cc:semaphore-create cacoo:api-get-num) "[internal]")
+(defvar cacoo:get-semaphore (cc:semaphore-create cacoo:process-num) "[internal]")
 
 (defun cacoo:api-get (method &optional params)
   (lexical-let
@@ -155,7 +150,6 @@
 ;;; Cache Control
 
 (defvar cacoo:api-image-cache nil "[internal]")
-
 (defvar cacoo:api-image-cache-num 10 "[internal]")
 
 (defun cacoo:api-image-cache-get-mru (url)
@@ -177,7 +171,6 @@
 ;;; Preview Buffer
 
 (defvar cacoo:anything-channel nil "[internal]")
-
 (defconst cacoo:anything-preview-buffer " *cacoo:preview*")
 
 (defun cacoo:anything-preview-buffer-init (title)

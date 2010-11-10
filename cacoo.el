@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.6
+;; Version: 1.7
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -21,182 +21,197 @@
 
 ;;; Commentary:
 
-;; Cacooで書いた画像をインラインで表示したり、編集画面をさっと開くことのできる
-;; マイナーモードです。画像はローカルにキャッシュしていますので、オフラインでも
-;; 画像を見ることができます。インライン表示時には自動的に指定のサイズに縮小します。
-;; 実際にはCacooだけではなく、URLで参照できてEmacsとImageMagickが解釈できる
-;; 図であれば大抵インライン表示できます。
+;; A minor mode for editing a document with Cacoo diagrams.  Diagrams
+;; are saved for local cache so that you can use the diagrams in the
+;; offline environment. Diagrams are re-sized by ImageMagick
+;; automatically and displayed in-line.
+
+;; Integrating Emacs with Cacoo, the diagramming tool on the Web, 
+;; I'm sure that Emacs becomes the most powerful documentation tool.
+
+;; Not only Cacoo diagrams, but also any images those are indicated by
+;; the URL can be displayed.
 
 ;;; Installation:
 
-;; 必要なもの、環境
+;; This program is dependent on followings:
 ;; - deferred.el (http://github.com/kiwanami/emacs-deferred/raw/master/deferred.el)
 ;; - concurrent.el (http://github.com/kiwanami/emacs-deferred/raw/master/concurrent.el)
 ;; - wget, ImageMagick(convert, identify, display)
 
-;; ロードパスに cacoo.el を置き、以下のように呼び出し用のコードを
-;; .emacs などに追加してください。以下の例では、Altキーを押しながら「-」
-;; を押すとOn/Offが切り替わるようになります。
+;; Put cacoo.el in your load-path, and add following code.
 
-;; ;設定例
 ;; (require 'cacoo)
-;; (global-set-key (kbd "M--") 'toggle-cacoo-minor-mode)
+;; (global-set-key (kbd "M--") 'toggle-cacoo-minor-mode) ; key bind example
 
 ;;; Usage:
 
-;; テキスト中に以下のように記述するとCacooの絵が入ります。
-;; [img:https://cacoo.com/diagrams/6m4ATG1ddlUiHPqd-0FAF7.png 200]
-;; 
-;; ※注意点として、Cacoo側でURLによる公開設定をしておく必要があります。
-;; 公開設定にしても、URLが他人に知られない限り図を見ることができません。
+;; This program replaces following markups into diagram images.
+;; [img:https://cacoo.com/diagrams/6m4ATG1ddlUiHPqd-0FAF7.png]
 
-;; cacoo-minor-modeがOnの時に以下のキーバインドが使えます。
-;; （使いやすくcacoo-minor-mode-keymapをカスタマイズしてみてください）
+;; `cacoo-minor-mode' defines some key binding.
+;; (You can customize key bindings through `cacoo-minor-mode-keymap'.
 
-;; * バッファ全体に対して
-;; C-c , T : バッファのすべての図をテキストに戻す
-;; C-c , D : バッファのすべての図を表示する（キャッシュがあればネットワークに接続しない）
-;; C-c , R : バッファのすべての図を取得し直す
+;; * For all diagram markups
+;; C-c , T : Revert all diagrams to text in the buffer.
+;; C-c , D : Display all diagrams in the buffer. (Using local cache files)
+;; C-c , R : Clear all cache files and retrieve diagram images again.
 
-;; * カーソール直後の図に対して
-;; C-c , t : テキストに戻す
-;; C-c , d : 図を表示する（キャッシュがあればネットワークに接続しない）
-;; C-c , r : 図を取得し直して表示する
-;; C-c , e : 図の編集画面を表示する（https://cacoo.com/diagrams/xxxxx/edit）
-;; C-c , v : 図の生涯画面を表示する（https://cacoo.com/diagrams/xxxxx）
-;; C-c , V : ローカルの図を外部ビューアーで開く
+;; * For the just following markup
+;; C-c , t : Revert to text
+;; C-c , d : Display the diagram
+;; C-c , r : Clear the cache file and retrieve the diagram image again
+;; C-c , e : Open Cacoo editor with the browser (https://cacoo.com/diagrams/xxxxx/edit)
+;; C-c , v : Open Cacoo detail page with the browser (https://cacoo.com/diagrams/xxxxx)
+;; C-c , V : Open the diagram image with the external viewer.
 
-;; * カーソールが編集中の図に対して
-;; C-c , g : リロードとテキストに戻すのを切り替える
-;;           →動的生成図の編集に便利
+;; * In the editing markup
+;; C-c , g : Toggle text and image
 
-;; * Cacooの機能に対して
-;; C-c , N : 新規図の作成 （https://cacoo.com/diagrams/new）
-;; C-c , l : 図の一覧 （https://cacoo.com/diagrams/）
+;; * For Cacoo integration
+;; C-c , N : Create a new diagram with the browser (https://cacoo.com/diagrams/new)
+;; C-c , l : Open the diagram list with the browser (https://cacoo.com/diagrams/)
 
-;; * ナビゲーション、編集
-;; C-c , n : 次の図に移動
-;; C-c , p : 前の図に移動
-;; C-c , i : 図のマークアップを挿入
-;; C-c , y : クリップボードのテキストを使って図のマークアップを挿入
+;; * Navigation and editing
+;; C-c , n : Move to the next diagram
+;; C-c , p : Move to the previous diagram
+;; C-c , i : Insert a blank diagram markup
+;; C-c , y : Insert a diagram markup with the clipboard(or kill-ring) text
 
-;; * その他
-;; C-c , C : キャッシュディレクトリを空にする
+;; * Etc
+;; C-c , C : Remove all files in the cache directory
 
-;; Cacoo以外でも以下のような図を表示することができます。
-;; （もちろん編集はできません）
-;; Web上の画像
-;; [img:http://example.com/zzz.png]
-;; ローカルの画像（絶対パス）
-;; [img:file:///xxx/yyy/zzz.png]
-;; ローカルの画像（相対パス）
-;; [img:zzz.png]
+;; You can display following URLs:
+;; (Of course, you can not edit the images with Cacoo!)
 
-;; 画像の取得や変換中にエラーが起きた場合、該当箇所の色が変わります。ま
-;; た、マウスオーバーで短くエラーメッセージがポップアップで表示されます。
-;; 大抵の問題は、wgetが見つからない、convertが見つからない、URL先の図が
-;; 見つからないなどだと思います。
+;; - Images on the Web
+;;     [img:http://example.com/zzz.png]
+;; - Local images (absolute path)
+;;     [img:file:///xxx/yyy/zzz.png]
+;; - Local images (abstract path from the visiting buffer)
+;;     [img:zzz.png]
 
-;;; カスタマイズなど
+;; If an error is occurred, this program highlight the markup text.
+;; You can check the error messages with the mouse over pop-up.  In
+;; most cases, the troubles are 'program (wget, convert, identify) not
+;; found' and 'the indicated image not found'.
 
-;; ブラウザは cacoo:browser-function で設定してあるものを使います。
-;; デフォルトは browse-url-browser-function の値です。
-;; 例：Macでsafariを使う場合
-;; (setq cacoo:browser-function 'browse-url-generic)
-;; (setq browse-url-generic-program "open")
+;;; Customize:
 
-;; cacoo:img-regexp, cacoo:img-pattern を変更することで、Wiki記法などに
-;; あわせることができます。cacoo:img-regexp は正規表現文字列のリストに
-;; もできますので、いくつかの記法を登録しておくことが出来ます。
+;; This program uses `cacoo:browser-function' as default browser.
+;; The default value is `browse-url-browser-function'.
 
-;; キャッシュ用のディレクトリ名は cacoo:img-dir で指定します。いちいち
-;; ディレクトリ作成で確認が必要なければ、 cacoo:img-dir-ok を t に設定
-;; してください。
+;; Ex: for safari on Mac
+;;   (setq cacoo:browser-function 'browse-url-generic)
+;;   (setq browse-url-generic-program "open")
 
-;; 画像の縮小サイズは cacoo:max-size で指定します。
-;; 以下のように書くことで画像ごとにも指定できます。
+;; Changing `cacoo:img-regexp' and `cacoo:img-pattern', you can adopt
+;; other markup format. The variable `cacoo:img-regexp' accepts a list
+;; of regexp strings.
+
+;; The directory name for the local cache files is set by
+;; `cacoo:img-dir'.  If you don't need confirmation of creating
+;; directories, set `cacoo:img-dir-ok' non-nil.
+
+;; Large images are reduced by `cacoo:max-size'.
+;; You can specify the image size individually, like this.
 ;; [img:file:///xxx/yyy/zzz.png 600]
 
-;; 外部画像ビューアーのプログラムは cacoo:external-viewer で指定します。
-;; nilに設定するとEmacsで開こうとします。
+;; The external image viewer is set by `cacoo:external-viewer'.
+;; If this variable is nil, open the image with Emacs.
 
-;; Emacs22などではPNGの透過部分が黒くなることがあります。
-;; (setq cacoo:png-background "white") を設定に追加して画像の
-;; リロードをしてみてください。
+;; In Emacs 22, the transparent color of PNG images may display as black.
+;; Then, following code maybe solve the problem.
+;;   (setq cacoo:png-background "white") 
 
-;; プラグインによって、その場で画像を生成したり高度なこともできるように
-;; なっています。詳しくはプラグイン周辺のソースの中のコメントを参照して
-;; ください。
+;; This program can be extended by the plugin mechanism. See the comments
+;; for the details (cacoo:plugin-***).
 
-;;; 制限事項
-
-;; 同一バッファ内で、同一画像ファイルを複数回表示することができません。
-
-;;; 更新履歴
+;;; History:
 
 ;; Revision 1.7  2010/10/27  sakurai
-;; deferred.el へ書き直し
+;; English translation.
+;; Rewrite on concurrent.el and deferred.el.
 ;; 
 ;; Revision 1.6  2010/07/19  sakurai
-;; SVGプラグイン追加
+;; Added SVG plugin.
 ;; 
 ;; Revision 1.5  2010/07/05  sakurai
-;; URLにパラメーターが付いていた場合は省くように修正。
-;; cacoo:browser-function でCacooを起動するブラウザを指定できるように修正
+;; Removing parameter strings from the URL.
+;; Added a variable `cacoo:browser-function'.
 ;; 
 ;; Revision 1.4  2010/06/17  sakurai
-;; cacoo:img-regexpを複数指定できるように修正
-;; hatena fotolifeのプラグイン追加
+;; Improved `cacoo:img-regexp' that accepts a list of regexp strings.
+;; Added a plugin of 'hatena fotolife'
 ;; 
 ;; Revision 1.3  2010/05/10  sakurai
-;; プラグインの仕組み追加
-;; URL生成プラグイン追加
-;; PNGに変換する拡張子の設定追加
+;; Added the plugin mechanism.
+;; Added a variable `cacoo:translation-exts'.
 ;; 
 ;; Revision 1.2  2010/05/08  sakurai
-;; バイトコンパイル時のバグ修正（by kitokitokiさん）
-;; 本文コメントに注意点などを追加
-;; 画像クリック時の動作を改善
+;; Bug fixed: byte-compiling (thx id:kitokitoki)
+;; Added: some documents.
+;; Improved: mouse clicking.
 ;; 
 ;; Revision 1.1  2010/05/08  sakurai
-;; エラー箇所をオーバーレイで強調
-;; 非同期処理経過の表示
-;; 透過PNGの背景色がおかしい場合や、ImageMagickのバージョンが古い場合に対応。
+;; Improved: highlighting error markups by overlay.
+;; Improved: asynchronous tasks.
+;; Improved: adopting transparent PNG and older ImageMagick program.
 ;;
 ;; Revision 1.0  2010/05/07  sakurai
 ;; Initial revision
+
+
+;; * memo
+;; clear-cache
+;; anything-integration
+;; get image by api
+;; plugins
 
 ;;; Code:
 
 (eval-when-compile (require 'cl))
 (require 'url-file)
-(require 'deferred)
+(require 'concurrent)
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Customize
+;;; Customize variables
 
-(defvar cacoo:base-url "https://cacoo.com/diagrams/")
-(defvar cacoo:new-url (concat cacoo:base-url "new"))
-(defvar cacoo:edit-url (concat cacoo:base-url "%KEY%/edit"))
-(defvar cacoo:view-url (concat cacoo:base-url "%KEY%"))
-(defvar cacoo:list-url cacoo:base-url)
+(defvar cacoo:api-key "y6KlL0PdnxBc5QNOln7N" "Set your API key!")
 
-(defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]*$") ; 本文から画像に置き換える文字列を取ってくる正規表現
-(defvar cacoo:img-pattern "[img:%s]") ; 画像として挿入する文字列
-(defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)") ; URLからCacooの画像のKeyを取ってくる正規表現
 
-(defvar cacoo:img-dir ".cimg") ; 画像キャッシュフォルダ
-(defvar cacoo:img-dir-ok nil) ; 勝手にディレクトリを作って良ければ t
+(defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]*$" "Markup regexp for searching diagrams.")
+(defvar cacoo:img-pattern "[img:%s]" "Pattern for inserting a markup")
+(defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)" "Regexp for extracting a diagram key in Cacoo.")
 
-(defvar cacoo:max-size 450) ; デフォルトの縮小サイズ
+(defvar cacoo:img-dir ".cimg" "Directory name for cache files.")
+(defvar cacoo:img-dir-ok nil "If non-nil, this program does not confirm creating a cache directory.")
 
-(defvar cacoo:external-viewer "display") ; ローカルの画像ビューアー。nilだとEmacsで開く。
-(defvar cacoo:png-background nil) ; 透過PNGの背景色がおかしい場合にセット
+(defvar cacoo:process-num 1 "Maximum external process number")
+(defvar cacoo:cmd-copy "cp" "Copy command")
+(defvar cacoo:copy-by-command t "If non-nil, this program copies files by the external command asynchronously. If nil, this program uses Emacs copy function `copy-file' synchronously.")
 
-(defvar cacoo:translation-exts '("eps" "ps")) ; PNGに変換する拡張子のリスト
-(defvar cacoo:browser-function browse-url-browser-function) ; Cacooを起動するbrowser
+(defvar cacoo:max-size 450 "Default maximum image size.")
 
-(defvar cacoo:plugins nil) ; プラグイン関数シンボルのリスト
+(defvar cacoo:external-viewer "display" "External viewer command. If nil, this program opens the image file in Emacs.")
+(defvar cacoo:png-background nil "If the transparent color of PNG images seems not to be good, set it non-nil.")
+
+(defvar cacoo:translation-exts '("eps" "ps") "A list of the extensions those need to translate to display in Emacs.")
+(defvar cacoo:browser-function browse-url-browser-function "The browser to open the Cacoo editor.")
+
+;;; Internal variables
+
+(defvar cacoo:base-url "https://cacoo.com/diagrams/" "[internal] The base URL in Cacoo")
+(defvar cacoo:new-url (concat cacoo:base-url "new") "[internal] URL for creating a diagram in Cacoo")
+(defvar cacoo:edit-url (concat cacoo:base-url "%KEY%/edit") "[internal] URL for editing a diagram in Cacoo")
+(defvar cacoo:view-url (concat cacoo:base-url "%KEY%") "[internal] URL for the diagram details in Cacoo")
+(defvar cacoo:list-url cacoo:base-url "[internal] URL for the diagram list in Cacoo")
+
+(defvar cacoo:plugins nil "[internal] A list of plugin symbols.")
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Fundamental Functions
@@ -204,7 +219,7 @@
 (defmacro cacoo:aif (test-form then-form &rest else-forms)
   `(let ((it ,test-form))
      (if it ,then-form ,@else-forms)))
-(put 'ewm:aif 'lisp-indent-function 2)
+(put 'cacoo:aif 'lisp-indent-function 2)
 
 (defun cacoo:define-keymap (keymap-list)
   (let ((map (make-sparse-keymap)))
@@ -235,16 +250,9 @@
   (cacoo:log "==================== mark ==== %s" 
              (format-time-string "%H:%M:%S" (current-time))))
 
-;; cacoo:$img 画像データの構造体
-;; url          : 画像を取ってくるURL、相対パス。
-;;              : `generated'だと既にキャッシュファイルがあるという前提。
-;; cached-file  : コピーしたオリジナルの画像
-;; resized-file : サイズ調整した画像
-;; start        : テキスト置き換えの開始位置
-;; end          : テキスト置き換えの終了位置
-;; size         : この画像の表示サイズ
-;; error        : 何か問題が発生したときの表示内容
-(defstruct cacoo:$img url cached-file resized-file start end size error)
+
+
+;;; File Utilities
 
 (defun cacoo:get-cache-dir() 
   (let* ((base-dir (file-name-directory 
@@ -253,8 +261,7 @@
     (expand-file-name cacoo:img-dir base-dir)))
 
 (defun cacoo:fix-directory ()
-  ;;バッファのカレントディレクトリに保存先ディレクトリを作る
-  ;;一応作って良いかどうか聞く
+  "Make a directory for cache files in the current directory which has visiting file."
   (let* ((img-dir (cacoo:get-cache-dir)))
     (unless (file-directory-p img-dir)
       (when (or cacoo:img-dir-ok 
@@ -266,14 +273,16 @@
         (error "Could not create a image directory.")))
     img-dir))
 
+
 (defun cacoo:get-cache-path (filename)
   (expand-file-name 
    filename (cacoo:get-cache-dir)))
 
-(defun cacoo:get-resize-path (filename)
+(defun cacoo:get-resize-path (filename size)
   (let ((ext (file-name-extension filename)))
     (expand-file-name
-     (format "resize_%s"
+     (format "resize_%s_%s"
+             size
              (if (member ext cacoo:translation-exts)
                  (replace-regexp-in-string
                   (concat "\\." ext "$") ".png" filename)
@@ -288,225 +297,382 @@
     (if (string-match "[^/]*$" url)
         (match-string 0 url)))))
 
-(defun cacoo:file-exists-p (file)
-  (and (file-exists-p file)
-       (< 0 (nth 7 (file-attributes file)))))
+(defun cacoo:get-cache-path-from-url (url)
+  (cacoo:get-cache-path (cacoo:get-filename-from-url url)))
 
-(defun cacoo:clear-cache-file (file)
-  (when (file-exists-p file)
-    (delete-file file))
-  (cacoo:aif (cacoo:get-resize-path file)
-             (when (file-exists-p it)
-               (delete-file it))))
+(defun cacoo:get-resize-path-from-url (url size)
+  (cacoo:get-resize-path (cacoo:get-filename-from-url url) size))
 
-(defun cacoo:load-diagram-remote(data &optional force-reload)
-  (lexical-let* ((data data) (force-reload force-reload)
-                 (org-path (cacoo:$img-cached-file data))
-                 (url (cacoo:$img-url data)))
-    (when force-reload (cacoo:clear-cache-file org-path))
-    (cond
-     ((cacoo:file-exists-p org-path)
-      (cacoo:resize-diagram data force-reload)
-      t)
-     (t
-      (deferred:$
-        (deferred:process
-          "wget" "-q" 
-          "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
-          "-O" org-path url)
-        (deferred:nextc it
-          (lambda (msg)
-            (if (cacoo:file-exists-p org-path)
-                (cacoo:resize-diagram data force-reload)
-              (setf (cacoo:$img-error data) msg)
-              (cacoo:display-diagram-by-text data))))
-        (deferred:error it
-          (lambda (msg)
-            (setf (cacoo:$img-error data) msg)
-            (cacoo:display-diagram-by-text data))))
-      t))))
 
 (defun cacoo:get-local-path-from-url(url)
   (cond
-   ((string-match "^file://\\(.*\\)$" url) ; フルパスを仮定
+   ((string-match "^file://\\(.*\\)$" url) ; assuming full path
     (match-string 1 url))
    ((cacoo:file-exists-p (expand-file-name url default-directory))
     (expand-file-name url default-directory))
    (t
     nil)))
 
-(defun cacoo:load-diagram-local(data &optional force-reload)
-  (let* ((url (cacoo:$img-url data))
-         (from-path (cacoo:get-local-path-from-url url))
-         (org-path (cacoo:$img-cached-file data)))
-    (when from-path
-      (when force-reload (cacoo:clear-cache-file org-path))
-      (unless (cacoo:file-exists-p org-path)
-        (ignore-errors
-          (copy-file from-path org-path t t)))
-      (if (cacoo:file-exists-p org-path)
-          (cacoo:resize-diagram data force-reload)
-        (setf (cacoo:$img-error data) "Could not copy a file.")
-        (cacoo:display-diagram-by-text data)))))
 
-(defun cacoo:get-image-size (data)
-  (let* ((file (cacoo:$img-cached-file data))
-         (ret (get-buffer-create (format " *Cacoo:identify:%s*" file))) 
-         line)
-    (buffer-disable-undo ret)
-    (call-process "identify" nil ret nil "-format" "%w %h" file)
-    (prog1
-        (with-current-buffer ret
-          (let* ((line (buffer-string))
-                 (cols (split-string line " "))
-                 (width (string-to-number (car cols)))
-                 (height (string-to-number (cadr cols))))
-            (cacoo:log "SIZE %s <= %s" line file)
-            (max width height)))
-      (kill-buffer ret))))
+(defun cacoo:file-exists-p (file)
+  (and (file-exists-p file)
+       (< 0 (nth 7 (file-attributes file)))))
 
-(defun cacoo:resize-diagram (data &optional force-reload)
-  (let* 
-      ((org-size (cacoo:get-image-size data))
-       (size (cacoo:$img-size data))
-       (not-resizep (< org-size size))
-       (resize-path (cacoo:$img-resized-file data))
-       (data data))
+(defun cacoo:get-image-type (file)
+  (let ((type (intern (file-name-extension file))))
+    (cond 
+     ((eq type 'jpg) 'jpeg)
+     (t type))))
+
+(defun cacoo:get-key-from-url (url)
+  (if (string-match cacoo:key-regexp url)
+      (match-string 1 url)
+    nil))
+
+(defun cacoo:make-url (tmpl-url key)
+  (if key (replace-regexp-in-string "%KEY%" key tmpl-url t) nil))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Struct
+
+;; cacoo:$img   : Structure for the image markups
+;; url          : URL for an image or relative path. It is also a key for the dataflow variable.
+;; start        : Start point for a markup
+;; end          : End point for a markup
+;; size         : Maximum image size along the long axis.
+
+(defstruct cacoo:$img url start end size)
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Image Workplace
+
+(defvar cacoo:image-wp-process-semaphore nil)
+
+(defun cacoo:image-wp-acquire-semaphore-d (&optional d)
+  (cond
+   (d (deferred:nextc d 
+        (lambda (x) 
+          (lexical-let ((x x))
+            (deferred:nextc 
+              (cc:semaphore-acquire cacoo:image-wp-process-semaphore)
+              (lambda (y) x))))))
+   (t (cc:semaphore-acquire cacoo:image-wp-process-semaphore))))
+
+(defun cacoo:image-wp-release-semaphore-d (d)
+  (deferred:nextc d
+    (lambda (x) 
+      (cc:semaphore-release cacoo:image-wp-process-semaphore)
+      x)))
+
+(defun cacoo:image-wp-resized-equal (a b)
+  (and (string-equal (car a) (car b))
+       (equal (cdr a) (cdr b))))
+
+(defvar cacoo:image-wp-original nil)
+(defvar cacoo:image-wp-resized  nil)
+
+(defun cacoo:image-wp-init ()
+  (setq cacoo:image-wp-process-semaphore (cc:semaphore-create cacoo:process-num)
+        cacoo:image-wp-original (cc:dataflow-environment nil 'equal)
+        cacoo:image-wp-resized  (cc:dataflow-environment nil 'cacoo:image-wp-resized-equal))
+  (cc:dataflow-connect cacoo:image-wp-original 'get-first 'cacoo:image-wp-create-original)
+  (cc:dataflow-connect cacoo:image-wp-resized  'get-first 'cacoo:image-wp-create-resized)
+  (when cacoo:debug
+    (cc:dataflow-connect 
+     cacoo:image-wp-original t (lambda (args) (cacoo:log "DF ORG / %S" args)))
+    (cc:dataflow-connect 
+     cacoo:image-wp-resized  t (lambda (args) (cacoo:log "DF RSZ / %S" args)))))
+
+(defun cacoo:image-wp-get-resized-d (url size)
+  ;;ここを呼ぶ
+  ;;deferredの引数には画像ファイル名が渡ってくる
+  (cc:dataflow-get cacoo:image-wp-resized (cons url size)))
+
+(defun cacoo:image-wp-get-original-d (url)
+  ;;ここを呼ぶ
+  ;;deferredの引数には画像ファイル名が渡ってくる
+  (cc:dataflow-get cacoo:image-wp-original url))
+
+(defun cacoo:image-wp-set-resized (url size file)
+  (cc:dataflow-set cacoo:image-wp-resized (cons url size) file))
+  
+(defun cacoo:image-wp-set-original (url file)
+  (cc:dataflow-set cacoo:image-wp-original url file))
+
+(defun cacoo:image-wp-create-resized (args)
+  ;;画像をリサイズしてWPに追加
+  (destructuring-bind (event ((url . size))) args
+    (cacoo:resize-diagram url size)))
+
+(defun cacoo:image-wp-create-original (args)
+  ;; 画像を取ってきてWPに追加
+  (destructuring-bind (event (url)) args
+    (cacoo:fix-directory)
     (cond
-     ((= 0 org-size)
-      (setf (cacoo:$img-error data) "Can not transform this image by convert.")
-      (cacoo:display-diagram-by-text data))
-     ((and (not force-reload) 
-           (cacoo:file-exists-p resize-path))
-      (cacoo:display-diagram data)
-      t)
-     (cacoo:png-background
-      (cacoo:resize-diagram-for-fillbg data not-resizep)
-      t)
+     ((string-match "^file:\\/\\/\\/" url) ; local
+      (cacoo:load-diagram-local url))
+     ((string-match "^https?:\\/\\/" url) ; web
+      (cacoo:load-diagram-remote url))
+     (t ; 相対パスを仮定
+      (cacoo:load-diagram-local url)))))
+
+;;; Create Original Image Cache
+
+(defun cacoo:load-diagram-remote(url)
+  (cacoo:log ">> cacoo:load-diagram-remote : %s" url)
+  (lexical-let* ((org-path (cacoo:get-cache-path-from-url url))
+                 (url url))
+    (cond
+     ((cacoo:file-exists-p org-path)
+      (cacoo:image-wp-set-original url org-path))
      (t
-      (cacoo:resize-diagram-for-transparent data not-resizep)
-      t))))
+      (deferred:$
+        (cacoo:image-wp-acquire-semaphore-d)
+        (deferred:processc it
+          "wget" "-q" 
+          "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
+          "-O" org-path url)
+        (deferred:nextc it
+          (lambda (msg)
+            (cacoo:image-wp-set-original 
+             url (if (cacoo:file-exists-p org-path) org-path
+                   (cons 'error msg)))))
+        (deferred:error it
+          (lambda (msg)
+            (cacoo:image-wp-set-original url (cons 'error msg))))
+        (cacoo:image-wp-release-semaphore-d it))))))
+
+(defun cacoo:load-diagram-local(url)
+  (cacoo:log ">> cacoo:load-diagram-local : %s" url)
+  (let* ((url url)
+         (from-path (cacoo:get-local-path-from-url url))
+         (cache-path (cacoo:get-cache-path-from-url filename)))
+    (cond
+     ((cacoo:file-exists-p cache-path)
+      (cacoo:image-wp-set-original url cache-path))
+     (t
+      (deferred:$
+        (cacoo:image-wp-acquire-semaphore-d)
+        (cacoo:copy-file-d it from-path cache-path)
+        (deferred:nextc it
+          (lambda (x) 
+            (cacoo:image-wp-set-original url cache-path)))
+        (deferred:error it
+          (lambda (msg) 
+            (cacoo:image-wp-set-original url
+             (cons 'error (format "Can not copy file %s -> %s" 
+                                  from-path cache-path)))))
+        (cacoo:image-wp-release-semaphore-d it))))))
+
+(defun cacoo:copy-file-d (d from-path to-path)
+  (unless d (setq d (deferred:next 'identity)))
+  (lexical-let ((from-path from-path) (to-path to-path))
+    (deferred:$
+      (if cacoo:copy-by-command
+          (deferred:processc d cacoo:cmd-copy from-path to-path)
+        (deferred:nextc d
+          (lambda (x) (ignore-errors (copy-file from-path to-path t t)))))
+      (deferred:nextc it
+        (lambda (x) 
+          (unless (cacoo:file-exists-p to-path)
+            (error "Can not copy the file : %s -> %s" from-path to-path)))))))
+
+;;; Create Resized Image Cache
+
+(defun cacoo:identify-diagram-d (d)
+  (deferred:nextc d
+    (lambda (file)
+      (deferred:$
+        (deferred:process "identify" "-format" "%w %h" file)
+        (deferred:nextc it
+          (lambda (line)
+            (let* ((cols (split-string line " "))
+                   (width (string-to-number (car cols)))
+                   (height (string-to-number (cadr cols))))
+              (cacoo:log "SIZE %S > %s" line (max width height))
+              (max width height))))))))
+
+(defun cacoo:resize-diagram (url max-size)
+  (cacoo:log ">> cacoo:resize-diagram : %s / %s" url max-size)
+  (lexical-let ((url url) (max-size max-size))
+    (deferred:$
+      (cacoo:image-wp-get-original-d url)
+      (cacoo:image-wp-acquire-semaphore-d it)
+      (cacoo:identify-diagram-d it)
+      (deferred:nextc it
+        (lambda (org-size)
+          (let ((resize-path (cacoo:get-resize-path-from-url url max-size))
+                (not-resizep (< org-size max-size)))
+            (cond
+             ((cacoo:file-exists-p resize-path)
+              (cacoo:image-wp-set-resized url max-size resize-path))
+             ((= 0 org-size)
+              (cacoo:image-wp-set-resized 
+               url max-size (cons 'error (format "Can not copy file %s" url))))
+             (cacoo:png-background
+              (cacoo:resize-diagram-for-fillbg url max-size not-resizep))
+             (t
+              (cacoo:resize-diagram-for-transparent url max-size not-resizep)))
+            nil)))
+      (cacoo:image-wp-release-semaphore-d it))))
+
+(defun cacoo:resize-diagram-for-transparent (url max-size not-resizep)
+  (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / resize: %s" url max-size not-resizep)
+  (lexical-let
+      ((url url) (max-size max-size)
+       (org-path (cacoo:get-cache-path-from-url url))
+       (resize-path (cacoo:get-resize-path-from-url url max-size)))
+    (deferred:$
+      (cond 
+       ((and not-resizep
+             (equal (file-name-extension org-path)
+                    (file-name-extension resize-path)))
+        (cacoo:copy-file-d nil org-path resize-path))
+       (t
+        (deferred:$
+          (cacoo:image-wp-acquire-semaphore-d)
+          (deferred:processc it
+            "convert" "-resize" (format "%ix%i" max-size max-size)
+            "-transparent-color" "#ffffff"
+            org-path (concat (file-name-extension resize-path)
+                             ":" resize-path))
+          (cacoo:image-wp-release-semaphore-d it))))
+      (deferred:nextc it
+        (lambda (msg)
+          (if (cacoo:file-exists-p resize-path)
+              (cacoo:image-wp-set-resized url max-size resize-path))))
+      (deferred:error it
+        (lambda (msg) 
+          (cacoo:image-wp-set-resized url max-size
+           (cons 'error (format "Can not resize image %s -> %s" 
+                                org-path resize-path))))))))
 
 (defun cacoo:get-background-img-path (path)
   (expand-file-name
    (format "back_%s" (file-name-nondirectory path))
    (file-name-directory path)))
 
-(defun cacoo:resize-diagram-for-transparent (data not-resizep)
-  (lexical-let* 
-      ((org-size (cacoo:get-image-size data))
-       (size (cacoo:$img-size data))
-       (org-path (cacoo:$img-cached-file data))
-       (resize-path (cacoo:$img-resized-file data))
-       (data data))
-    (cond 
-     ((and not-resizep
-           (equal (file-name-extension org-path)
-                  (file-name-extension resize-path)))
-      (ignore-errors
-        (copy-file org-path resize-path t t))
-      (cacoo:display-diagram data))
-     (t
-      (deferred:$
-       (deferred:process
-         "convert" "-resize" (format "%ix%i" size size)
-         "-transparent-color" "#ffffff"
-         org-path (concat (file-name-extension resize-path)
-                          ":" resize-path))
-       (deferred:nextc it
-         (lambda (msg)
-           (if (cacoo:file-exists-p resize-path)
-               (cacoo:display-diagram data)
-             (setf (cacoo:$img-error data) msg)
-             (cacoo:display-diagram-by-text data))))
-       (deferred:error it
-         (lambda (msg)
-           (setf (cacoo:$img-error data) msg)
-           (cacoo:display-diagram-by-text data))))))
-    t))
-
-(defun cacoo:resize-diagram-for-fillbg (data not-resizep)
-  (lexical-let* 
-      ((org-size (cacoo:get-image-size data))
-       (data data)
-       (org-path (cacoo:$img-cached-file data))
-       (resize-path (cacoo:$img-resized-file data))
-       (size (cacoo:$img-size data))
-       (resize-size nil)
+(defun cacoo:resize-diagram-for-fillbg (url max-size not-resizep)
+  (cacoo:log ">> cacoo:resize-diagram-for-fillbg : %s / %s / resize: %s" url max-size not-resizep)
+  (lexical-let*
+      ((url url) (max-size max-size)
+       (org-path (cacoo:get-cache-path-from-url url))
+       (resize-path (cacoo:get-resize-path-from-url url max-size))
+       resize-size 
        (tmpfile (cacoo:get-background-img-path org-path)))
     (deferred:$
-      (deferred:next
-        (lambda (x)
-          (cond
-           ((and not-resizep
-                 (equal (file-name-extension org-path)
-                        (file-name-extension resize-path)))
-              (ignore-errors ; 画像のサイズが小さいときはコピー
-                (copy-file org-path resize-path t t))
-              nil)
-           (t ; 通常はリサイズする
-            (deferred:process
-              "convert" org-path "-resize" (format "%ix%i" size size)
-              (concat (file-name-extension resize-path) ":" resize-path))))))
+      (cond
+       ((and not-resizep ; 小さい場合はコピー
+             (equal (file-name-extension org-path)
+                    (file-name-extension resize-path)))
+        (cacoo:copy-file-d nil org-path resize-path))
+       (t ; 通常はリサイズする
+        (deferred:process
+          "convert" org-path "-resize" (format "%ix%i" max-size max-size)
+          (concat (file-name-extension resize-path) ":" resize-path))))
       (deferred:processc it ; 縮小した画像のサイズを取得
         "identify" "-format" "%wx%h" resize-path)
       (deferred:nextc it ; 縮小した画像と同じサイズの背景画像を準備
-        (lambda (x) (deferred:process "convert" "-size" x
-                      (concat "xc:" cacoo:png-background) 
-                      tmpfile)))
-      (deferred:processc it ; 背景に重ねる
-        "convert" tmpfile resize-path "-flatten" resize-path)
+        (lambda (dim) (deferred:process "convert" "-size" dim
+                      (concat "xc:" cacoo:png-background) tmpfile)))
+      (deferred:processc it "convert" tmpfile resize-path "-flatten" resize-path)
       (deferred:nextc it
-        (lambda (msg)
+        (lambda (x)
           (if (cacoo:file-exists-p resize-path)
-              (cacoo:display-diagram data)
-            (setf (cacoo:$img-error data)
-                  (format "Could not compose. \n%s" msg))
-            (cacoo:display-diagram-by-text data))
-          (when (file-exists-p tmpfile)
-            (delete-file tmpfile))))
+              (cacoo:image-wp-set-resized url max-size resize-path))))
       (deferred:error it
-        (lambda (x) 
-          (setf (cacoo:$img-error data)
-                (format "Resize error : %s" x))
-          (cacoo:display-diagram-by-text data)))
-      )))
+        (lambda (msg) 
+          (cacoo:image-wp-set-resized url max-size
+           (cons 'error (format "Can not resize image %s -> %s" 
+                                org-path resize-path))))))))
 
-(defun cacoo:buffer-string (format buf)
-  (format format
-          (with-current-buffer buf (buffer-string))))
+
 
-(defun cacoo:get-image-type (data)
-  (let ((type (intern (file-name-extension 
-                       (cacoo:$img-resized-file data)))))
-    (cond 
-     ((eq type 'jpg) 'jpeg)
-     (t type))))
+;;; Display
+
+(defun cacoo:display-diagram-revert (data)
+  (let ((mod (buffer-modified-p))
+        (start (cacoo:$img-start data))
+        (end (cacoo:$img-end data)))
+    (remove-text-properties start end
+     '(display nil mouse-face nil help-echo nil keymap nil))
+    (cacoo:display-diagram-overlay-remove start end)
+    (set-buffer-modified-p mod)))
 
 (defun cacoo:display-diagram (data)
+  (lexical-let ((data data)
+                (start (cacoo:$img-start data))
+                (end (cacoo:$img-end data)))
+    (cacoo:log ">> cacoo:display-diagram : %s / %s" (cacoo:$img-url data) (cacoo:$img-size data))
+    (deferred:$
+      (cacoo:image-wp-get-resized-d (cacoo:$img-url data) (cacoo:$img-size data))
+      (deferred:nextc it
+        (lambda (x) 
+          (if (and (consp x) (eq 'error (car x))) (error (cdr x))
+            (cacoo:display-diagram-by-image x data))))
+      (deferred:error it
+        (lambda (e) (cacoo:display-diagram-by-text start end e))))))
+
+(defun cacoo:display-diagram-by-image (image-file data)
+  (cacoo:log ">> cacoo:display-diagram-by-image : %s <- %s / %s"
+                 image-file (cacoo:$img-url data) (cacoo:$img-size data))
   (clear-image-cache)
   (let ((img (ignore-errors 
-               (create-image 
-                (cacoo:$img-resized-file data)
-                (cacoo:get-image-type data) nil
-                :relief 1)))
+               (create-image image-file
+                             (cacoo:get-image-type image-file) nil
+                             :relief 1)))
+        (start (cacoo:$img-start data))
+        (end (cacoo:$img-end data))
         (map (make-sparse-keymap))
         (mod (buffer-modified-p)))
     (cond
      ((null img)
-      (setf (cacoo:$img-error data) (format "The Emacs could not display this image type."))
-      (cacoo:display-diagram-by-text data))
+      (cacoo:display-diagram-by-text
+       start end (format "The Emacs could not display this image type.")))
      (t
       (define-key map [mouse-1] 'cacoo:do-click-link)
       (define-key map (kbd "\n") 'cacoo:do-click-link)
       (add-text-properties 
-       (cacoo:$img-start data)
-       (cacoo:$img-end data)
-       (list 'display img 'keymap map 'mouse-face 'highlight))
-      (cacoo:display-diagram-overlay-remove 
-       (cacoo:$img-start data)
-       (cacoo:$img-end data))
+       start end (list 'display img 'keymap map 'mouse-face 'highlight))
+      (cacoo:display-diagram-overlay-remove start end)
       (set-buffer-modified-p mod)))))
+
+(defun cacoo:do-click-link ()
+  (interactive)
+  (beginning-of-line)
+  (cacoo:do-next-diagram
+   (lambda (data)
+     (let ((url (cacoo:$img-url data))
+           (pos-end (cacoo:$img-start data))
+           (pos-start (cacoo:$img-start data)))
+       (goto-char pos-start)
+       (beginning-of-line)
+       (cond
+        ((string-match "^file:\\/\\/\\/" url)
+         (cacoo:view-original-cached-image
+          (cacoo:$img-cached-file data))
+         pos-end)
+        ((string-match "^https?:\\/\\/" url)
+         (cacoo:edit-next-diagram-command)
+         pos-end)
+        (t ; 相対パスを仮定
+         (cacoo:view-original-cached-image
+          (cacoo:$img-cached-file data))
+         pos-end))))))
+
+(defun cacoo:display-diagram-by-text (start end msg)
+  (cacoo:log ">> cacoo:display-diagram-by-text : %s" msg)
+  (let ((mod (buffer-modified-p)))
+    (put-text-property start end
+     'help-echo (format "Cacoo: Error  %s" msg))
+    (cacoo:display-diagram-overlay-add start end)
+    (set-buffer-modified-p mod)))
+
+;;; Error overlays
 
 (defvar cacoo:display-diagram-overlays nil) ; エラー表示用のオーバーレイ
 (make-variable-buffer-local 'cacoo:display-diagram-overlays)
@@ -541,21 +707,9 @@
         do (delete-overlay i))
   (setq cacoo:display-diagram-overlays nil))
 
-(defun cacoo:display-diagram-by-text (data)
-  (let ((mod (buffer-modified-p)))
-    (put-text-property 
-     (cacoo:$img-start data) (cacoo:$img-end data)
-     'help-echo (format "Cacoo: Error  %s" 
-                        (cacoo:$img-error data)))
-    (cacoo:display-diagram-overlay-add
-     (cacoo:$img-start data) (cacoo:$img-end data))
-    (set-buffer-modified-p mod)))
+
 
-(defun cacoo:image-search-forward ()
-  (cacoo:image-search))
-
-(defun cacoo:image-search-backward ()
-  (cacoo:image-search t))
+;;; Navigation
 
 (defun cacoo:image-search (&optional backward)
   ;;バッファ上のポイント位置以降の画像のテキストパターンを
@@ -587,31 +741,6 @@
      (t
       (error "cacoo:img-regexp is not regexp pattern. [%s]" cacoo:img-regexp)))))
 
-(defun cacoo:do-next-diagram (action)
-  (cond
-   ((cacoo:image-search-forward)
-    (let ((start (match-beginning 0))
-          (end (match-end 0))
-          (content (match-string 1)) data)
-      (setq data 
-            (cacoo:aif 
-             (cacoo:try-plugins start end content) it 
-             (let* ((cols (split-string content "[ \t]+"))
-                    (url (car cols))
-                    (filename (cacoo:get-filename-from-url url)))
-                    (make-cacoo:$img
-                     :url url :start start :end end
-                     :cached-file (cacoo:get-cache-path filename)
-                     :resized-file (cacoo:get-resize-path filename)
-                     :size (cacoo:aif (cadr cols) 
-                                      (string-to-number it) 
-                                      cacoo:max-size)))))
-      (if data
-          (funcall action data))
-      (goto-char (cacoo:$img-end data))))
-   (t
-    nil)))
-
 (defun cacoo:try-plugins (start end content)
   ;;プラグインを試してみる
   (loop for i in cacoo:plugins
@@ -620,103 +749,93 @@
         return data
         finally return nil))
 
-(defun cacoo:load-next-diagram (&optional force-reload)
-  (lexical-let ((force-reload force-reload))
-    (cacoo:do-next-diagram
-     (lambda (data)
-       (let ((url (cacoo:$img-url data))
-             (pos-end (cacoo:$img-end data)))
-         (cacoo:fix-directory)
-         (cond
-          ((eq 'generated url) ; 既にファイル有り
-           (cacoo:resize-diagram data force-reload)
-           pos-end)
-          ((string-match "^file:\\/\\/\\/" url) ; local
-           (cacoo:load-diagram-local data force-reload)
-           pos-end)
-          ((string-match "^https?:\\/\\/" url) ; web
-           (cacoo:load-diagram-remote data force-reload)
-           pos-end)
-          (t ; 相対パスを仮定
-           (cacoo:load-diagram-local data force-reload)
-           pos-end)))))))
+
 
-(defvar cacoo:no-side-effects nil) ; 内部管理用：画像の生成が必要ない場合はt
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Cacoo API
+
+(defun cacoo:image-search-forward ()
+  (cacoo:image-search))
+
+(defun cacoo:image-search-backward ()
+  (cacoo:image-search t))
+
+(defun cacoo:do-next-diagram (action)
+  (cond
+   ((cacoo:image-search-forward)
+      (let* 
+          ((start (match-beginning 0)) (end (match-end 0))
+           (content (match-string 1)) data)
+        (setq data 
+              (cacoo:aif 
+                  (cacoo:try-plugins start end content) it 
+                (let* ((cols (split-string content "[ \t]+"))
+                       (url (car cols))
+                       (size (cacoo:aif (cadr cols)
+                                 (string-to-number it) cacoo:max-size)))
+                  (make-cacoo:$img :url url :start start :end end :size size))))
+        (funcall action data)
+        (goto-char end)))
+   (t nil)))
+
+(defun cacoo:load-next-diagram ()
+  (cacoo:do-next-diagram 'cacoo:display-diagram))
 
 (defun cacoo:revert-next-diagram ()
-  (let ((cacoo:no-side-effects t)) ; 画像などを生成させない
-    (cacoo:do-next-diagram
-     (lambda (data)
-       (let ((mod (buffer-modified-p)))
-         (remove-text-properties 
-          (cacoo:$img-start data) (cacoo:$img-end data) 
-          '(display nil mouse-face nil help-echo nil keymap nil))
-         (cacoo:display-diagram-overlay-remove
-          (cacoo:$img-start data) (cacoo:$img-end data))
-         (set-buffer-modified-p mod))
-       (cacoo:$img-end data)))))
+  (cacoo:do-next-diagram 'cacoo:display-diagram-revert))
 
-(defun cacoo:do-click-link ()
-  (interactive)
-  (beginning-of-line)
-  (cacoo:do-next-diagram
-   (lambda (data)
-     (let ((url (cacoo:$img-url data))
-           (pos-end (cacoo:$img-start data))
-           (pos-start (cacoo:$img-start data)))
-       (goto-char pos-start)
-       (beginning-of-line)
-       (cond
-        ((string-match "^file:\\/\\/\\/" url)
-         (cacoo:view-original-cached-image
-          (cacoo:$img-cached-file data))
-         pos-end)
-        ((string-match "^https?:\\/\\/" url)
-         (cacoo:edit-next-diagram-command)
-         pos-end)
-        (t ; 相対パスを仮定
-         (cacoo:view-original-cached-image
-          (cacoo:$img-cached-file data))
-         pos-end))))))
+(defun cacoo:clear-cache-next-diagram ()
+  (save-excursion
+    (cacoo:do-next-diagram 
+     (lambda (data) 
+       
+       ))))
 
 (defun cacoo:clear-all-cache-files ()
-  ;;現在のキャッシュディレクトリの中身を全部削除する
+  "Clear all files in the current cache directory."
   (let ((imd-dir (cacoo:get-cache-dir)))
     (loop for i in (directory-files imd-dir)
           for f = (expand-file-name i imd-dir)
           if (file-regular-p f)
           do (delete-file f))))
 
-(defun cacoo:view-original-cached-image (cached-file)
-  ;;原寸大の画像を参照する
-  (cond
-   (cacoo:external-viewer
-    ;;外部ビューアーコマンドが指定されていればそれを起動
-    (call-process cacoo:external-viewer
-                  nil 0 nil cached-file))
-   (t
-    ;;外部ビューアーがなければimage-modeで開く
-    (find-file cached-file))))
+(defun cacoo:view-original-cached-image (url)
+  (deferred:$
+    (cacoo:image-wp-get-original-d url)
+    (deferred:nextc it
+      (lambda (cached-file) 
+        (cond
+         (cacoo:external-viewer
+          (deferred:process cacoo:external-viewer cached-file))
+         (t
+          (find-file cached-file)))))))
+
+(defun cacoo:insert-pattern-url (url)
+  (insert (format cacoo:img-pattern url)))
+
+(defun cacoo:open-browser (url)
+  (let ((browse-url-browser-function cacoo:browser-function))
+    (browse-url url)))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Commands and Minor Mode Definitions
+;;; Commands
 
 (defun cacoo:insert-pattern-command ()
   (interactive)
-  (insert (format cacoo:img-pattern "")))
+  (cacoo:insert-pattern-url ""))
 
 (defun cacoo:insert-yank-command ()
   (interactive)
-  (insert (format cacoo:img-pattern 
-                  (current-kill 0))))
+  (cacoo:insert-pattern-url (current-kill 0)))
 
 (defun cacoo:view-local-cache-next-diagram-command () 
   (interactive)
   ;;原寸大の画像をローカルの環境で参照する
   (cacoo:do-next-diagram
    (lambda (data)
-     (cacoo:view-original-cached-image 
-      (cacoo:$img-cached-file data)))))
+     (cacoo:view-original-cached-image (cacoo:$img-url data)))))
 
 (defun cacoo:clear-all-cache-files-command ()
   (interactive)
@@ -728,8 +847,9 @@
 (defun cacoo:reload-next-diagram-command ()
   (interactive)
   ;;カーソール直後の図をリロードする
+  (cacoo:clear-cache-next-diagram)
   (save-excursion
-    (cacoo:load-next-diagram t)))
+    (cacoo:load-next-diagram)))
 
 (defun cacoo:reload-or-revert-current-diagram-command ()
   (interactive)
@@ -744,14 +864,18 @@
      (t
       (end-of-line)
       (cacoo:navi-prev-diagram-command)
-      (cacoo:load-next-diagram t)))))
+      (cacoo:clear-cache-next-diagram)
+      (cacoo:load-next-diagram)))))
 
 (defun cacoo:reload-all-diagrams-command ()
   (interactive)
   ;;バッファ内のすべての図を更新する
   (save-excursion
     (goto-char (point-min))
-    (while (cacoo:load-next-diagram t))))
+    (while (cacoo:image-search-forward)
+      (cacoo:clear-cache-next-diagram))
+    (goto-char (point-min))
+    (while (cacoo:load-next-diagram))))
 
 (defun cacoo:revert-next-diagram-command ()
   (interactive)
@@ -781,10 +905,6 @@
   (save-excursion
     (cacoo:load-next-diagram)))
 
-(defun cacoo:open-browser (url)
-  (let ((browse-url-browser-function cacoo:browser-function))
-    (browse-url url)))
-
 (defun cacoo:create-new-diagram-command ()
   (interactive)
   ;;ブラウザで新規図を開く
@@ -795,15 +915,6 @@
   ;;ブラウザで図の一覧を開く
   (cacoo:open-browser cacoo:list-url))
 
-(defun cacoo:get-key-from-url (url)
-  (if (string-match cacoo:key-regexp url)
-      (match-string 1 url)
-    nil))
-
-(defun cacoo:make-url (tmpl-url key)
-  (if key 
-      (replace-regexp-in-string "%KEY%" key tmpl-url t) nil))
-
 (defun cacoo:edit-next-diagram-command ()
   (interactive)
   ;;カーソール直後の図をブラウザで編集する
@@ -811,19 +922,13 @@
 
 (defun cacoo:open-diagram-gen (tmpl-url)
   ;;カーソール直後の図をブラウザで編集する
-  (let (error-message)
-    (save-excursion
-      (cond
-       ((cacoo:image-search-forward)
-        (let* ((line (match-string 0))
-               (url (car (split-string (match-string 1) "[ \t]")))
-               (key (cacoo:get-key-from-url url))
-               (open-url (cacoo:make-url tmpl-url key)))
-          (cacoo:open-browser (or open-url url))))
-       (t
-        (setq error-message "URL is not found."))))
-    (when error-message 
-      (message error-message))))
+  (save-excursion
+    (cacoo:do-next-diagram
+     (lambda (data) 
+       (let* ((url (cacoo:$img-url data))
+              (key (cacoo:get-key-from-url url))
+              (open-url (cacoo:make-url tmpl-url key)))
+         (cacoo:open-browser (or open-url url)))))))
 
 (defun cacoo:view-next-diagram-command ()
   (interactive)
@@ -840,6 +945,11 @@
   (interactive)
   (if (cacoo:image-search-backward)
       (beginning-of-line)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Minor mode, Key bindings and Menu
 
 (defvar cacoo-minor-mode-keymap
       (cacoo:define-keymap
@@ -892,6 +1002,7 @@
     (cacoo:minor-mode-abort)))
 
 (defun cacoo:minor-mode-setup ()
+  (cacoo:image-wp-init)
   (cacoo:display-all-diagrams-command))
 
 (defun cacoo:minor-mode-abort ()
@@ -928,264 +1039,6 @@
   cacoo-minor-mode-keymap "Cacoo menu map" 
   cacoo:minor-mode-menu-spec)
 (easy-menu-add cacoo-menu-map cacoo-minor-mode-keymap)
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; plugins
-
-;; ** plugin定義の方法
-
-;; 引数に以下のものが渡る。
-;; - 画像マーカーの開始位置：start
-;; - 終了位置：end
-;; - 画像マーカーの中身：content
-;; 返値として cacoo:$img 構造体を返すとプラグインで処理したものと見なす。
-;; 画像をローカルで生成してファイル名を構造体にセットするなど。
-;; 何もしない場合はポイント位置は動かさないこと
-
-;; ** 長文埋め込みのプラグイン
-;; [img:* (url) (filename) (size:省略可)]
-;; (長文)
-;; <<<
-;; urlの中の <<< がヒアドキュメントのようにURLエンコーディングして埋め込まれる
-(defvar cacoo:plugin-long-url-regexp
-      "^\\* \\([^ \n\r\t]+\\) \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
-(defvar cacoo:plugin-long-url-terminator "<<<")
-
-(defun cacoo:plugin-long-url (start end content)
-  (when (string-match cacoo:plugin-long-url-regexp content)
-    (let ((url (match-string 1 content))
-          (filename (match-string 2 content))
-          (size (match-string 3 content)))
-      (cacoo:plugin-long-url-gen 
-       start end content url filename size))))
-
-(defun cacoo:plugin-long-url-gen (start end content url filename size)
-  (let (ret)
-    (save-excursion
-      (goto-char end)
-      (when (re-search-forward 
-             cacoo:plugin-long-url-terminator)
-        (let* ((t-start (match-beginning 0))
-               (t-end (match-end 0))
-               (text (buffer-substring (1+ end) (1- t-start)))
-               (rurl 
-                (replace-regexp-in-string 
-                 cacoo:plugin-long-url-terminator
-                 (cacoo:plugin-url-encode-string text)
-                 url)))
-          (setq ret
-                (make-cacoo:$img
-                 :url rurl :start start :end t-end
-                 :cached-file (cacoo:get-cache-path filename)
-                 :resized-file (cacoo:get-resize-path filename)
-                 :size (cacoo:aif 
-                        size
-                        (string-to-number it) 
-                        cacoo:max-size))))))
-    ret))
-
-(defun cacoo:plugin-url-encode-string (str)
-  ;; URLエンコーディング（w3mを参考）
-  (let ((array (string-to-vector str)))
-    (mapconcat 'identity
-     (loop for i from 0 below (length array)
-           for ch = (aref array i)
-           collect
-           (cond
-            ((eq ch ?\n) "%0D%0A")
-            ((string-match "[-a-zA-Z0-9_:/.]" (char-to-string ch))
-             (char-to-string ch))
-            (t
-             (format "%%%02X" ch)))) nil)))
-
-;; ** UML埋め込みのプラグイン
-;; [img:UML (filename) (size:省略可)]
-;; UML記述 (http://yuml.me/)
-;; <<<
-
-(defvar cacoo:plugin-class-regexp "^UML \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
-
-(defun cacoo:plugin-class-diagram (start end content)
-  (when (string-match cacoo:plugin-class-regexp content)
-    (let ((url "http://yuml.me/diagram/scruffy/class/<<<")
-          (filename (match-string 1 content))
-          (size (match-string 2 content)))
-      (cacoo:plugin-long-url-gen 
-       start end content url filename size))))
-
-;; ** シーケンス図埋め込みのプラグイン
-;; [img:SEQ (filename) (size:省略可)]
-;; シーケンス図記述 (http://www.websequencediagrams.com/)
-;; <<<
-
-(defvar cacoo:plugin-seq-regexp "SEQ \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
-
-(defun cacoo:plugin-seq-diagram (start end content)
-  (when (string-match cacoo:plugin-seq-regexp content)
-    (let ((url "http://www.websequencediagrams.com/index.php?message=<<<&style=default&scale=100&paginate=0&paper=letter&landscape=0&format=png")
-          (filename (match-string 1 content))
-          (size (match-string 2 content)))
-      (cacoo:plugin-long-url-gen 
-       start end content url filename size))))
-
-;; ** コマンドライン起動埋め込みのプラグイン
-;; [img:CMD "(command)" (filename) (size:省略可)]
-;; ファイルとして書き出すもの
-;; <<<
-;; commandや書き出し文字列の中の %IN% がテンポラリファイル名、
-;; %OUT%が出力ファイル名に入れ替わる。
-
-(defvar cacoo:plugin-cmd-regexp
-      "^CMD '\\([^']+\\)' \\([^ \t\r\n]+\\)\\( [0-9]+\\)?")
-(defvar cacoo:plugin-cmd-terminator "<<<")
-
-(defun cacoo:plugin-cmd (start end content)
-  (when (string-match cacoo:plugin-cmd-regexp content)
-    (let ((cmd (match-string 1 content))
-          (filename (match-string 2 content))
-          (size (match-string 3 content)))
-      (cacoo:plugin-cmd-gen 
-       start end content cmd filename size))))
-
-(defun cacoo:plugin-cmd-gen (start end content cmd filename size)
-  (let (ret)
-    (save-excursion
-      (goto-char end)
-      (when (re-search-forward 
-             cacoo:plugin-cmd-terminator)
-        (let* ((t-start (match-beginning 0))
-               (t-end (match-end 0))
-               (text (buffer-substring (1+ end) (1- t-start)))
-               (output-path (cacoo:get-cache-path filename))
-               (error-msg (cacoo:plugin-cmd-exec cmd output-path text)))
-          (setq ret
-                (make-cacoo:$img
-                 :url 'generated :start start :end t-end
-                 :cached-file output-path
-                 :resized-file (cacoo:get-resize-path filename)
-                 :size (cacoo:aif 
-                        size
-                        (string-to-number it)
-                        cacoo:max-size)
-                 :error error-msg)))))
-    ret))
-
-(defun cacoo:plugin-cmd-replace-io (text in out)
-  (replace-regexp-in-string 
-   "%IN%" in (replace-regexp-in-string
-              "%OUT%" out text t) t))
-
-(defun cacoo:plugin-cmd-exec (cmd output-path text)
-  (unless cacoo:no-side-effects ; t の時は何もしない
-    (let* ((tmpfile (format "tmp_%s.txt" filename))
-           (rcmd  (cacoo:plugin-cmd-replace-io cmd  tmpfile output-path))
-           (rtext (cacoo:plugin-cmd-replace-io text tmpfile output-path))
-           (tmpbuf (get-buffer-create (format " *cacoo-cmd:%s*" (deferred:uid))))
-           (cols (split-string rcmd)) msg)
-      (unwind-protect
-          (progn
-            (write-region rtext nil tmpfile)
-            (apply 'call-process (car cols) nil tmpbuf nil (cdr cols))
-            (setq msg (cacoo:buffer-string "CMD [%s]" tmpbuf))
-            (cacoo:log msg)
-            (when (cacoo:file-exists-p output-path)
-              (setq msg nil)))
-        (ignore-errors
-          (delete-file tmpfile))
-        (kill-buffer tmpbuf))
-      msg)))
-
-;; ** Graphviz図埋め込みのプラグイン
-;; [img:DOT (filename) (size:省略可)]
-;; dot記述 (http://www.graphviz.org/)
-;; <<<
-
-(defvar cacoo:plugin-dot-regexp "DOT \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
-
-(defun cacoo:plugin-dot-diagram (start end content)
-  (when (string-match cacoo:plugin-dot-regexp content)
-    (let ((filename (match-string 1 content))
-          (size (match-string 2 content)))
-      (cacoo:plugin-cmd-gen 
-       start end content "dot -Tpng %IN% -o %OUT%" filename size))))
-
-;; ** はてなフォトライフ記法のプラグイン
-;; [f:id:(hatena id):(image id)(ext):image]
-;; はてなフォトライフ記法の画像を取ってくるプラグイン
-;; 
-;; 使う場合は以下のように画像タグに[f:〜]を追加します。
-;; (setq cacoo:img-regexp 
-;;      '("\\[img:\\(.*\\)\\][^]\n\r]*$"
-;;        "\\[f:\\(.*\\)\\][^]\n\t]*$"))
-;; 
-
-(defvar cacoo:plugin-hatena-fotolife-regexp
-  "^\\id:\\([^:]+\\):\\([0-9]+\\)\\([jpg]\\):image")
-
-(defun cacoo:plugin-hatena-fotolife (start end content)
-  (when (string-match cacoo:plugin-hatena-fotolife-regexp content)
-    (let* ((hatena-id (match-string 1 content))
-           (image-id (match-string 2 content))
-           (ext-id (match-string 3 content))
-           (date-id (substring image-id 0 8))
-           (ext-name 
-            (cond
-             ((equal "j" ext-id) "jpg")
-             ((equal "p" ext-id) "png")
-             ((equal "g" ext-id) "gif")
-             (t (error "unknown ext-id [%s]" ext-id))))
-           (url (format "http://f.hatena.ne.jp/images/fotolife/k/%s/%s/%s.%s" 
-                        hatena-id date-id image-id ext-name))
-           (filename (format "hatena-%s-%s.%s" hatena-id image-id ext-name)))
-      (make-cacoo:$img
-       :url url :start start :end end
-       :cached-file (cacoo:get-cache-path filename)
-       :resized-file (cacoo:get-resize-path filename)
-       :size cacoo:max-size))))
-
-;; ** SVG
-;; [img:SVG (filename) (size:省略可)]
-;; SVG記述
-;; <<<
-
-(defvar cacoo:plugin-svg-regexp "SVG \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
-
-(defun cacoo:plugin-svg (start end content)
-  (when (string-match cacoo:plugin-svg-regexp content)
-    (let ((filename (match-string 1 content))
-          (size (match-string 2 content))
-          ret)
-      (save-excursion
-        (goto-char end)
-        (when (re-search-forward 
-               cacoo:plugin-cmd-terminator)
-          (let* ((t-start (match-beginning 0))
-                 (t-end (match-end 0))
-                 (text (buffer-substring (1+ end) (1- t-start)))
-                 (output-path (cacoo:get-cache-path filename)))
-            (write-region text nil output-path)
-            (setq ret
-                  (make-cacoo:$img
-                   :url 'generated :start start :end t-end
-                   :cached-file output-path
-                   :resized-file (cacoo:get-resize-path filename)
-                   :size (cacoo:aif 
-                          size
-                          (string-to-number it)
-                          cacoo:max-size))))))
-    ret)))
-
-;; プラグイン登録
-(setq cacoo:plugins
-      (append '(cacoo:plugin-long-url 
-                cacoo:plugin-class-diagram
-                cacoo:plugin-seq-diagram
-                cacoo:plugin-dot-diagram
-                cacoo:plugin-cmd
-                cacoo:plugin-hatena-fotolife
-                cacoo:plugin-svg)
-              cacoo:plugins))
-
 
 ;; for test
 
