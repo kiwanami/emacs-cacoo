@@ -172,6 +172,7 @@
 (eval-when-compile (require 'cl))
 (require 'url-file)
 (require 'concurrent)
+(require 'json)
 
 
 
@@ -200,7 +201,13 @@
 (defvar cacoo:translation-exts '("eps" "ps") "A list of the extensions those need to translate to display in Emacs.")
 (defvar cacoo:browser-function browse-url-browser-function "The browser to open the Cacoo editor.")
 
+(defvar cacoo:preview-temp-dir "/tmp" "A directory to save a preview image temporally.")
+(defvar cacoo:http-get-file-cmd '("wget" "-q" "-S" "--no-check-certificate" "-O" output-file url))
+(defvar cacoo:http-get-stdout-cmd '("wget" "-q" "-O" "-" url))
+
 ;;; Internal variables
+
+(defvar cacoo:api-url-base "https://cacoo.com/api/v1/" "[internal] Cacoo API base URL.")
 
 (defvar cacoo:base-url "https://cacoo.com/diagrams/" "[internal] The base URL in Cacoo")
 (defvar cacoo:new-url (concat cacoo:base-url "new") "[internal] URL for creating a diagram in Cacoo")
@@ -231,6 +238,11 @@
      keymap-list)
     map))
 
+(defun cacoo:k (key alist)
+  (or (cdr (assq key alist)) ""))
+
+;;; for debug
+
 (eval-and-compile
   (defvar cacoo:debug nil "Debug output switch.")) ; debug
 (defvar cacoo:debug-count 0 "[internal] Debug output counter.") ; debug
@@ -248,6 +260,28 @@
   (interactive)
   (cacoo:log "==================== mark ==== %s" 
              (format-time-string "%H:%M:%S" (current-time))))
+
+(defun cacoo:debug-report-semaphore ()
+  (interactive)
+  (message
+   "Semaphore: process permits: %s / waiting: %s  preview permit: %s / waiting: %s"
+   (cc:semaphore-permits cacoo:image-wp-process-semaphore)
+   (length (cc:semaphore-waiting-deferreds cacoo:image-wp-process-semaphore))
+   (cc:semaphore-permits cacoo:preview-semaphore)
+   (length (cc:semaphore-waiting-deferreds cacoo:preview-semaphore))))
+
+(defmacro cacoo:api-debug-deferred (d msg &rest args)
+  `(deferred:nextc ,d
+     (lambda (x) (funcall 'message ,msg ,@args) x)))
+
+(defun cacoo:api-debug-dbuffer (d)
+  (deferred:nextc d
+    (lambda (x)
+      (pop-to-buffer
+       (with-current-buffer (get-buffer-create "*cacoo:api*")
+         (erase-buffer)
+         (insert (pp-to-string x))
+         (current-buffer))))))
 
 
 
@@ -286,7 +320,7 @@
                  (replace-regexp-in-string
                   (concat "\\." ext "$") ".png" filename)
                filename))
-             (cacoo:get-cache-dir))))
+     (cacoo:get-cache-dir))))
 
 (defun cacoo:get-filename-from-url (url)
   (cond
@@ -331,7 +365,87 @@
 (defun cacoo:make-url (tmpl-url key)
   (if key (replace-regexp-in-string "%KEY%" key tmpl-url t) nil))
 
+(defun cacoo:list-template (template-list data-alist)
+  (loop for i in template-list
+        collect
+        (cond 
+         ((symbolp i)
+          (cacoo:k i data-alist))
+         (t i))))
+
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Cacoo API Functions
+
+(defun cacoo:api-param-serialize (params)
+  (cond
+   (params
+    (mapconcat
+     'identity
+     (loop for p in params
+           collect (format "%s=%s" (car p) (cdr p)))
+     "&"))
+   (t "")))
+
+(defvar cacoo:api-cancel-flag nil "[internal]")
+
+(defun cacoo:api-get-d (method &optional params)
+  (lexical-let
+      ((url (concat cacoo:api-url-base method ".json"
+                    "?" (cacoo:api-param-serialize
+                         (cons (cons 'apiKey cacoo:api-key)
+                               params)))))
+    (deferred:$
+      (cacoo:image-wp-acquire-semaphore-d url)
+      (deferred:nextc it
+        (lambda (x)
+          (unless cacoo:api-cancel-flag
+            (deferred:$
+              (apply 'deferred:process 
+                     (cacoo:list-template 
+                      cacoo:http-get-stdout-cmd `((url . ,url))))
+              (deferred:nextc it
+                (lambda (x)
+                  (let ((json-array-type 'list))
+                    (json-read-from-string x))))))))
+      (deferred:error it
+        (lambda (e) (message "API Error: %s" e) nil))
+      (cacoo:image-wp-release-semaphore-d it url))))
+
+(defun cacoo:http-get-apikey (url)
+  (if (and cacoo:api-key
+           (string-match (regexp-quote cacoo:api-url-base) url))
+      (concat url "?" (cacoo:api-param-serialize
+                       (list (cons 'apiKey cacoo:api-key))))
+    url))
+
+(defun cacoo:http-get-d (d url output-path)
+  (lexical-let ((d d) (url (cacoo:http-get-apikey url))
+                (output-path output-path))
+    (unless d (setq d (deferred:next 'identity)))
+    (deferred:$
+      (deferred:nextc d
+        (lambda (x) 
+          (cacoo:log "  >> URL %s" url)
+          (apply 'deferred:process
+                 (cacoo:list-template 
+                  cacoo:http-get-file-cmd 
+                  `((output-file . ,output-path) (url . ,url))))))
+      (deferred:nextc it
+        (lambda (response-text)
+          (cacoo:log "  >> RESPONSE : %s" response-text)
+          (let* ((headers (split-string response-text "[\r\n]+"))
+                 (response (car headers)))
+            (if (string-match "200" response)
+                nil 
+              (ignore-errors (delete-file output-path))
+              (cacoo:log "  >> RESPONSE : %s " response-text)
+              response))))
+      (deferred:error it
+        (lambda (err)
+          (cacoo:log "  >> HTTP GET Error : %s" err)
+          (format "Can not access / HTTP GET : %s" url))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Struct
@@ -351,21 +465,32 @@
 
 (defvar cacoo:image-wp-process-semaphore nil)
 
-(defun cacoo:image-wp-acquire-semaphore-d (&optional d)
+(defun cacoo:image-wp-acquire-semaphore-d (log &optional d)
+  (cacoo:log "Semaphore: process permits: %s / waiting: %s"
+             (cc:semaphore-permits cacoo:image-wp-process-semaphore)
+             (length (cc:semaphore-waiting-deferreds cacoo:image-wp-process-semaphore)))
+  (cacoo:log "## SEMAPHORE ACQUIRE (%s)" log)
   (cond
    (d (deferred:nextc d 
         (lambda (x) 
           (lexical-let ((x x))
             (deferred:nextc 
               (cc:semaphore-acquire cacoo:image-wp-process-semaphore)
-              (lambda (y) x))))))
+              (lambda (y) 
+                (cacoo:log "## SEMAPHORE ACQUIRE -- (%s)" x)
+                x))))))
    (t (cc:semaphore-acquire cacoo:image-wp-process-semaphore))))
 
-(defun cacoo:image-wp-release-semaphore-d (d)
-  (deferred:nextc d
-    (lambda (x) 
-      (cc:semaphore-release cacoo:image-wp-process-semaphore)
-      x)))
+(defun cacoo:image-wp-release-semaphore-d (d log)
+  (lexical-let ((log log))
+    (deferred:nextc d
+      (lambda (x) 
+        (cacoo:log "Semaphore: process permits: %s / waiting: %s"
+                   (cc:semaphore-permits cacoo:image-wp-process-semaphore)
+                   (length (cc:semaphore-waiting-deferreds cacoo:image-wp-process-semaphore)))
+        (cacoo:log "## SEMAPHORE RELEASE (%s)" log)
+        (cc:semaphore-release cacoo:image-wp-process-semaphore)
+        x))))
 
 (defun cacoo:image-wp-resized-equal (a b)
   (and (string-equal (car a) (car b))
@@ -405,23 +530,24 @@
                    (substring-no-properties url) file))
 
 (defun cacoo:image-wp-clear-cache (url)
-  (cacoo:aif
-      (cc:dataflow-get-sync cacoo:image-wp-original url)
+  (cacoo:aif (cc:dataflow-get-sync cacoo:image-wp-original url)
       (progn
-        (delete-file it)
+        (if (and (stringp it) (file-exists-p it))
+            (ignore-errors (delete-file it)))
         (cc:dataflow-clear cacoo:image-wp-original url)))
   (let ((remove-keys 
          (loop for i in (cc:dataflow-get-avalable-pairs 
                          cacoo:image-wp-resized)
                for key = (car i)
                for key-url = (car key)
-               if (string-equal url key-url)
+               if (equal url key-url)
                collect key)))
     (loop for i in remove-keys
           do
           (cacoo:aif (cc:dataflow-get-sync cacoo:image-wp-resized i)
               (progn
-                (delete-file it)
+                (if (and (stringp it) (file-exists-p it))
+                    (ignore-errors (delete-file it)))
                 (cc:dataflow-clear cacoo:image-wp-resized i))))))
 
 ;;; Event handling
@@ -456,20 +582,18 @@
      (t
       (cacoo:log ">>   http request : %s" url)
       (deferred:$
-        (cacoo:image-wp-acquire-semaphore-d)
-        (deferred:processc it
-          "wget" "-q" 
-          "--no-check-certificate" ; 古い証明書しかないとcacooのサイトが検証できないため
-          "-O" cache-path url)
+        (cacoo:image-wp-acquire-semaphore-d url)
+        (cacoo:http-get-d it url cache-path)
         (deferred:nextc it
-          (lambda (msg)
+          (lambda (err)
+            (cacoo:log ">>   http response : %s" err)
             (cacoo:image-wp-set-original 
-             url (if (cacoo:file-exists-p cache-path) cache-path
-                   (cons 'error msg)))))
+             url (if (and (null err) (cacoo:file-exists-p cache-path)) cache-path
+                   (cons 'error err)))))
         (deferred:error it
           (lambda (msg)
             (cacoo:image-wp-set-original url (cons 'error msg))))
-        (cacoo:image-wp-release-semaphore-d it))))))
+        (cacoo:image-wp-release-semaphore-d it url))))))
 
 (defun cacoo:load-diagram-local(url)
   (cacoo:log ">> cacoo:load-diagram-local : %s" url)
@@ -482,7 +606,7 @@
       (cacoo:image-wp-set-original url cache-path))
      (t
       (deferred:$
-        (cacoo:image-wp-acquire-semaphore-d)
+        (cacoo:image-wp-acquire-semaphore-d url)
         (cacoo:copy-file-d it from-path cache-path)
         (deferred:nextc it
           (lambda (x) 
@@ -492,7 +616,7 @@
             (cacoo:image-wp-set-original url
              (cons 'error (format "Can not copy file %s -> %s" 
                                   from-path cache-path)))))
-        (cacoo:image-wp-release-semaphore-d it))))))
+        (cacoo:image-wp-release-semaphore-d it url))))))
 
 (defun cacoo:copy-file-d (d from-path to-path)
   (unless d (setq d (deferred:next 'identity)))
@@ -528,7 +652,21 @@
   (lexical-let ((url url) (max-size max-size))
     (deferred:$
       (cacoo:image-wp-get-original-d url)
-      (cacoo:image-wp-acquire-semaphore-d it)
+      (deferred:nextc it
+        (lambda (x) 
+          (cacoo:log ">>   get : %S" x)
+          (cond
+           ((and x (consp x) (eq 'error (car x)))
+            (cacoo:image-wp-set-resized url max-size (cons 'error (cdr x))))
+           (t
+            (cacoo:resize-diagram-convert url max-size x))))))))
+
+(defun cacoo:resize-diagram-convert (url max-size filename)
+  (cacoo:log ">> cacoo:resize-diagram-convert : %s / %s" url max-size)
+  (lexical-let ((url url) (max-size max-size))
+    (deferred:$
+      (deferred:succeed filename)
+      (cacoo:image-wp-acquire-semaphore-d (cons url max-size) it)
       (cacoo:identify-diagram-d it)
       (deferred:nextc it
         (lambda (org-size)
@@ -546,10 +684,13 @@
              (t
               (cacoo:resize-diagram-for-transparent url max-size not-resizep)))
             nil)))
-      (cacoo:image-wp-release-semaphore-d it))))
+      (deferred:error it
+        (lambda (e) (cacoo:image-wp-set-resized url max-size (cons 'error e))))
+      (cacoo:image-wp-release-semaphore-d it (cons url max-size)))))
 
 (defun cacoo:resize-diagram-for-transparent (url max-size not-resizep)
-  (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / not-resize: %s" url max-size not-resizep)
+  (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / not-resize: %s" 
+             url max-size not-resizep)
   (lexical-let
       ((url url) (max-size max-size)
        (cache-path (cacoo:get-cache-path-from-url url))
@@ -562,13 +703,13 @@
         (cacoo:copy-file-d nil cache-path resize-path))
        (t
         (deferred:$
-          (cacoo:image-wp-acquire-semaphore-d)
+          (cacoo:image-wp-acquire-semaphore-d (cons url max-size))
           (deferred:processc it
             "convert" "-resize" (format "%ix%i" max-size max-size)
             "-transparent-color" "#ffffff"
             cache-path (concat (file-name-extension resize-path)
                              ":" resize-path))
-          (cacoo:image-wp-release-semaphore-d it))))
+          (cacoo:image-wp-release-semaphore-d it (cons url max-size)))))
       (deferred:nextc it
         (lambda (msg)
           (if (cacoo:file-exists-p resize-path)
@@ -640,7 +781,8 @@
       (cacoo:image-wp-get-resized-d (cacoo:$img-url data) (cacoo:$img-size data))
       (deferred:nextc it
         (lambda (x) 
-          (if (and (consp x) (eq 'error (car x))) (error (cdr x))
+          (cacoo:log ">>   get(display) : %S" x)
+          (if (and x (consp x) (eq 'error (car x))) (error (cdr x))
             (cacoo:display-diagram-by-image x data))))
       (deferred:error it
         (lambda (e) (cacoo:display-diagram-by-text start end e))))))
@@ -999,6 +1141,7 @@
          ("C-c , d"   . cacoo:display-next-diagram-command)
          ("C-c , D"   . cacoo:display-all-diagrams-command)
 
+         ("C-c , I"   . cacoo:anything-command)
          ("C-c , i"   . cacoo:insert-pattern-command)
          ("C-c , y"   . cacoo:insert-yank-command)
 
@@ -1034,7 +1177,8 @@
 
 (defun cacoo:minor-mode-setup ()
   (cacoo:image-wp-init)
-  (cacoo:display-all-diagrams-command))
+  (cacoo:display-all-diagrams-command)
+  (cacoo:api-retrieve-diagrams-d))
 
 (defun cacoo:minor-mode-abort ()
   (cacoo:display-diagram-overlay-clear)
@@ -1060,6 +1204,8 @@
     ["View diagram details" cacoo:view-next-diagram-command t]
     ["View a local cache" cacoo:view-local-cache-next-diagram-command t]
     "----"
+    ["Select by Anything" cacoo:anything-command t]
+    "----"
     ["Create new diagram" cacoo:create-new-diagram-command t]
     ["List diagrams" cacoo:open-diagram-list-command t]
     "----"
@@ -1071,13 +1217,448 @@
   cacoo:minor-mode-menu-spec)
 (easy-menu-add cacoo-menu-map cacoo-minor-mode-keymap)
 
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Diagram Cache Controller
+
+(defun cacoo:api-retrieve-sheets-d (diagram-json)
+  (lexical-let ((diagram-json diagram-json))
+    (deferred:$
+      (cacoo:api-get-d (format "diagrams/%s" (cacoo:k 'diagramId diagram-json)))
+      (deferred:nextc it
+        (lambda (whole-json)
+          (let ((sheets-json (cdr (assq 'sheets whole-json))))
+            (cons (cons 'sheets sheets-json) diagram-json)))))))
+
+(defun cacoo:api-diagrams-get-by-id (id diagrams-json)
+  (loop for i in diagrams-json
+        if (equal (cacoo:k 'diagramId i) id)
+        return i))
+
+(defun cacoo:api-check-diagram-list-cache-d (new-json cached-json each-func)
+  (lexical-let ((each-func each-func))
+    (deferred:parallel
+      (loop for i in new-json
+            for cache = (and cached-json 
+                             (cacoo:api-diagrams-get-by-id 
+                              (cacoo:k 'diagramId i) cached-json))
+            collect
+            (deferred:nextc
+              (cacoo:api-check-diagram-cache-d i cache)
+              (lambda (x) (funcall each-func x) x))))))
+
+(defun cacoo:api-check-diagram-cache-d (new-json cached-json)
+  (let ((new-time    (date-to-time (cacoo:k 'updated new-json)))
+        (cached-time (and cached-json 
+                          (date-to-time 
+                           (cacoo:k 'updated cached-json)))))
+    (if (or (null cached-time) (time-less-p cached-time new-time))
+        (cacoo:api-retrieve-sheets-d new-json)
+      (deferred:succeed cached-json))))
+
+(defvar cacoo:api-diagrams-cache nil "[internal]")
+
+(defun cacoo:api-retrieve-diagrams-d ()
+  (lexical-let ((sheet-counter 0) 
+                (diagrams-counter 1) 
+                (cache-backup cacoo:api-diagrams-cache)
+                diagrams-number)
+    (cacoo:api-prepare-cancel)
+    (setq cacoo:api-diagrams-cache nil)
+    (if cacoo:api-key
+      (deferred:$
+        (cacoo:api-get-d "diagrams")
+        (deferred:nextc it
+          (lambda (whole-json)
+            (let ((diagrams-json (cacoo:k 'result whole-json)))
+              (setq diagrams-number (length diagrams-json))
+              (cacoo:api-check-diagram-list-cache-d
+               diagrams-json
+               cache-backup
+               (lambda (x) 
+                 (incf sheet-counter (cacoo:k 'sheetCount x))
+                 (message "Cacoo: Getting diagram and sheet informations... %s/%s" 
+                          diagrams-counter diagrams-number)
+                 (incf diagrams-counter))))))
+        (deferred:nextc it
+          (lambda (x)
+            (cond
+             (cacoo:api-cancel-flag
+              (message "Cacoo: Cancelled."))
+             (t
+              (setq cacoo:api-diagrams-cache x)
+              (message "Cacoo: all sheets [%s] are collected." sheet-counter)))
+            x))
+        (deferred:error it
+          (lambda (err) 
+            (message "Cacoo: Can not retrieve diagram data by API. -> %s" err)
+            (setq cacoo:api-diagrams-cache 'error))))
+      (deferred:fail "Cacoo API key is nil."))))
+
+; (cacoo:api-debug-dbuffer (cacoo:api-retrieve-diagrams-d))
+
+;;; Canceling asynchronous tasks
+
+(defun cacoo:api-prepare-cancel ()
+  (interactive)
+  (setq cacoo:api-cancel-flag nil)
+  (defadvice keyboard-quit (before cacoo:api-cancel)
+    (cacoo:api-cancel)
+    (cacoo:api-clear-cancel))
+  (ad-activate-regexp "cacoo:api-cancel"))
+
+(defun cacoo:api-clear-cancel ()
+  (interactive)
+  (cacoo:log "AT: clear-cancel")
+  (ignore-errors
+    (ad-deactivate-regexp "cacoo:api-cancel")
+    (ad-remove-advice 'keyboard-quit 'after 'cacoo:api-cancel)))
+
+(defun cacoo:api-cancel ()
+  (interactive)
+  (setq cacoo:api-cancel-flag t))
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Image Preview
+
+;;; Cache Control
+
+(defvar cacoo:preview-image-cache nil "[internal]")
+(defvar cacoo:preview-image-cache-num 10 "[internal]")
+
+(defun cacoo:preview-image-cache-get-mru (url)
+  (let ((cached-pair (assoc url cacoo:preview-image-cache)))
+    (when cached-pair
+      (setq cacoo:preview-image-cache
+            (cons cached-pair
+                  (loop for i in cacoo:preview-image-cache
+                        for iurl = (car i)
+                        with count = 1
+                        unless (or (equal url iurl) 
+                                   (<= cacoo:preview-image-cache-num count))
+                        collect (progn (incf count) i)))))
+    (cdr cached-pair)))
+
+(defun cacoo:preview-image-cache-add (url image)
+  (push (cons url image) cacoo:preview-image-cache) image)
+
+;;; Preview Buffer
+
+(defvar cacoo:anything-channel nil "[internal]")
+(defconst cacoo:preview-buffer " *cacoo:preview*")
+
+(defun cacoo:preview-buffer-init (title)
+  (let ((buf (get-buffer cacoo:preview-buffer)))
+    (unless buf
+      (setq buf (get-buffer-create cacoo:preview-buffer))
+      (with-current-buffer buf
+        (buffer-disable-undo buf)
+        (set (make-local-variable 'preview-title) "")
+        (set (make-local-variable 'preview-progress) "")
+        (set (make-local-variable 'preview-count) 0))
+      (cc:signal-disconnect-all cacoo:anything-channel)
+      (loop for i in '((show-image . cacoo:preview-buffer-on-show-image)
+                       (progress . cacoo:preview-buffer-on-show-progress)
+                       (animation . cacoo:preview-buffer-on-show-animation)
+                       (image-load-start . cacoo:preview-buffer-start-animation)
+                       (image-load-finish . cacoo:preview-buffer-stop-animation))
+            for ev = (car i)
+            for f = (cdr i)
+            do (cc:signal-connect cacoo:anything-channel ev f)))
+
+    (cc:signal-send cacoo:anything-channel 'show-image title nil nil)
+    buf))
+
+(defun cacoo:preview-buffer-on-show-image (args)
+  (with-current-buffer (get-buffer cacoo:preview-buffer)
+    (destructuring-bind (event (title url img)) args
+      (setq preview-title title
+            preview-count 0
+            preview-progress "")
+      (cacoo:preview-buffer-update-mode-line)
+      (erase-buffer)
+      (cond 
+       (url
+        (insert (propertize " " 'display `(space :align-to (+ center (-0.5 . ,img)))))
+        (insert-image img)
+        (let ((win (get-buffer-window cacoo:preview-buffer)))
+          (when win (set-window-point win (1+ (point-min))))))
+       (t
+        (insert "No image..."))))))
+
+(defconst cacoo:preview-mode-line-format "%s %5s %s") ; animation, progress, title
+
+(defun cacoo:preview-buffer-update-mode-line ()
+  (let ((anm "-/|\\"))
+    (setq mode-line-format 
+          (format cacoo:preview-mode-line-format
+                  (char-to-string 
+                   (aref anm (% preview-count (length anm))))
+                  preview-progress preview-title)))
+    (force-mode-line-update))
+
+(defun cacoo:preview-buffer-on-show-progress (args)
+  (with-current-buffer (get-buffer cacoo:preview-buffer)
+    (destructuring-bind (event (progress)) args
+      (setq preview-progress progress)
+      (cacoo:preview-buffer-update-mode-line))))
+
+(defun cacoo:preview-buffer-on-show-animation (buf)
+  (with-current-buffer (get-buffer cacoo:preview-buffer)
+    (incf preview-count)
+    (cacoo:preview-buffer-update-mode-line)))
+
+
+(defvar cacoo:preview-buffer-thread nil "[internal]")
+
+(defun cacoo:preview-buffer-stop-animation ()
+  (setq cacoo:preview-buffer-thread nil))
+
+(defun cacoo:preview-buffer-start-animation ()
+  (unless cacoo:preview-buffer-thread
+    (setq cacoo:preview-buffer-thread t)
+    (cc:thread 
+     60 
+     (while cacoo:preview-buffer-thread
+       (cc:signal-send cacoo:anything-channel 'animation)))))
+
+
+(defun cacoo:preview-progress (d current total)
+  (lexical-let
+      ((progress (apply 'concat
+             (loop for i from 1 to total
+                   collect (if (<= i current) "O" ".")))))
+    (deferred:nextc (or d (deferred:succeed))
+      (lambda (x)
+        (cc:signal-send cacoo:anything-channel 'progress progress)
+        x))))
+
+(defun cacoo:preview-image-get-d (url)
+  (cacoo:log ">> cacoo:preview-image-get-d : %s" url)
+  (let ((image (cacoo:preview-image-cache-get-mru url)))
+    (cond
+     (image
+      (deferred:succeed image))
+     (t
+      (lexical-let
+          ((url url) 
+           (org-file (expand-file-name "_preview_org.png" cacoo:preview-temp-dir))
+           (resized-file (expand-file-name "_preview_resized.png" cacoo:preview-temp-dir))
+           (win (cacoo:preview-get-preview-window)))
+        (deferred:$
+          (cc:semaphore-interrupt-all cacoo:preview-semaphore)
+          (cacoo:preview-progress it 1 4)
+          (deferred:nextc it
+            (lambda (x)
+              (cc:signal-send cacoo:anything-channel 'image-load-start)
+              (cacoo:log ">>   http request : %s" url)
+              (cacoo:http-get-d nil url org-file)))
+          (cacoo:preview-progress it 3 4)
+          (deferred:nextc it
+            (lambda (err)
+              (cacoo:log ">>   http response : %s" err)
+              (if (and (null err) (cacoo:file-exists-p org-file)) 
+                  (deferred:process "identify" "-format" "%w %h" org-file)
+                (error err))))
+          (deferred:nextc it
+            (lambda (sizestr)
+              (let* ((ww (* (window-width win) (frame-char-width)))
+                     (wh (* (- (window-height win) 2) (frame-char-height)))
+                     (isize (mapcar 'string-to-int (split-string sizestr))))
+                (if (or (< ww (car isize)) (< wh (cadr isize)))
+                    (progn 
+                      (cacoo:preview-progress nil 4 4)
+                      (deferred:$
+                        (deferred:process
+                          "convert" "-resize" (format "%ix%i" ww wh)
+                          org-file (concat (file-name-extension resized-file) ":" resized-file))
+                        (deferred:nextc it (lambda (x) resized-file))))
+                  org-file))))
+          (deferred:nextc it
+            (lambda (ifile)
+              (clear-image-cache)
+              (let ((img (create-image (cacoo:preview-load-image-data ifile) 'png t)))
+                (cacoo:preview-image-cache-add url img)
+                img)))
+          (deferred:error it
+            (lambda (e) (cacoo:log "Preview Error : %s" e)))
+          (deferred:nextc it
+            (lambda (x)
+              (cc:semaphore-release cacoo:preview-semaphore)
+              (cc:signal-send cacoo:anything-channel 'image-load-finish)
+              (when (file-exists-p org-file) (ignore-errors (delete-file org-file)))
+              (when (file-exists-p resized-file) (ignore-errors (delete-file resized-file)))
+              x))))))))
+
+(defun cacoo:preview-load-image-data (file)
+  (let ((buf (find-file-noselect file t t)))
+    (prog1 (with-current-buffer buf (buffer-string))
+      (kill-buffer buf))))
+
+(defvar cacoo:preview-window nil "[internal]")
+
+(defun cacoo:preview-get-preview-window ()
+  (let ((win (anything-window)))
+    (unless cacoo:preview-window
+      (setq cacoo:preview-window 
+            (cond
+             ((< (window-width win) (* 2 (window-height win)))
+              (split-window win))
+             (t
+              (split-window win (/ (window-width win) 2) t))))
+      (set-window-buffer 
+       cacoo:preview-window 
+       (cacoo:preview-buffer-init "No Image...")))
+    cacoo:preview-window))
+
+(defvar cacoo:preview-semaphore (cc:semaphore-create 1) "[internal]")
+
+(defun cacoo:preview (title url)
+  (cacoo:log "AT preview %s" url)
+  (lexical-let ((url url) (title title))
+    (cacoo:preview-get-preview-window)
+    (deferred:$
+      (cacoo:preview-image-get-d url)
+      (deferred:nextc it
+        (lambda (img)
+          (cc:signal-send cacoo:anything-channel 'show-image title url img)))
+      (deferred:error it
+        (lambda (e) (message "Preview Error : %s" e))))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Cacoo-Anything Application Functions
+
+(defun cacoo:anything-format (diagram sheet)
+  (cons 
+   (format "[%s] %s : %s   %s"
+           (if (equal "url" (cacoo:k 'security diagram)) "+" "-")
+           (cacoo:k 'title diagram)
+           (cacoo:k 'name sheet)
+           (cacoo:k 'ownerNickname diagram))
+   (cons diagram sheet)))
+
+(defun cacoo:anything-collect-diagrams ()
+  (let (lines)
+    (loop for d in cacoo:api-diagrams-cache
+          do
+          (loop for s in (cdr (assq 'sheets d))
+                do
+                (push (cacoo:anything-format d s) lines)))
+    (nreverse lines)))
+
+(defvar cacoo:preview-action-last-data nil)
+(defun cacoo:preview-action (data)
+  (unless (eq cacoo:preview-action-last-data data)
+    (setq cacoo:preview-action-last-data data)
+    (let ((diagram (car data)) (sheet (cdr data)))
+      (cacoo:preview 
+       (car (cacoo:anything-format diagram sheet))
+       (cacoo:k 'imageUrlForApi sheet)))))
+
+(defun cacoo:anything-insert-and-display (url)
+  (save-excursion
+    (cacoo:insert-pattern-url url))
+  (cacoo:display-next-diagram-command))
+
+(defvar anything-c-source-cacoo 
+  '((name . "Image source")
+    (candidates . cacoo:anything-collect-diagrams)
+    (action 
+     ("Insert API URL" 
+      . (lambda (x) (cacoo:anything-insert-and-display (cacoo:k 'imageUrlForApi (cdr x)))))
+     ("Insert Open URL" 
+      . (lambda (x) (cacoo:anything-insert-and-display (cacoo:k 'imageUrl (cdr x)))))
+     ("Add URL to kill-ring" 
+      . (lambda (x) (kill-new (cacoo:k 'imageUrl (cdr x)))))
+     ("Show Detail (Browser)" 
+      . (lambda (x) (cacoo:open-browser (cacoo:k 'url (cdr x)))))
+     ("Edit Diagram (Browser)" 
+      . (lambda (x) (cacoo:open-browser 
+                     (cacoo:make-url 
+                      cacoo:edit-url 
+                      (cacoo:k 'diagramId (car x)))))))
+    (candidate-number-limit . 200)
+    (migemo)
+    (persistent-action . cacoo:preview-action)))
+
+(defadvice anything-move-selection-common (after cacoo:anything)
+  (when (eq (anything-buffer-get) anything-buffer)
+    (anything-execute-persistent-action)))
+(ad-deactivate-regexp "cacoo:anything")
+
+;;; Startup and Cleanup
+
+(defun cacoo:anything-startup ()
+  (cacoo:log "AT: startup")
+  (setq cacoo:preview-window nil)
+  (setq cacoo:anything-channel (cc:signal-channel 'cacoo:anything)))
+
+(defun cacoo:anything-cleanup ()
+  (let ((buf (get-buffer cacoo:preview-buffer)))
+    (when (and buf (buffer-live-p buf))
+      (kill-buffer buf)))
+  (cc:signal-disconnect-all cacoo:anything-channel)
+  (setq cacoo:anything-channel nil)
+  (cacoo:log "AT: cleanup"))
+
+(defun cacoo:anything-cache-clear ()
+  (interactive)
+  (setq cacoo:api-diagrams-cache nil
+        cacoo:preview-image-cache nil))
+
+;;; Anything command
+
+(defun cacoo:anything-command (&optional arg)
+  (interactive "P")
+  (cond
+   ((null cacoo:api-key)
+    (message "Get your Cacoo API key and set it `cacoo:api-key'."))
+   ((null cacoo:api-diagrams-cache)
+    (message "Now retrieving diagram data. Wait a moment."))
+   ((eq 'error cacoo:api-diagrams-cache)
+    (message "Can not retrieve diagram data. Check your network status and settings."))
+   (t
+    (cacoo:anything-startup)
+    (deferred:$
+      (if arg (cacoo:api-retrieve-diagrams-d)
+        (deferred:next 'identity))
+      (deferred:nextc it
+        (lambda (x) 
+          (ad-activate-regexp "cacoo:anything")
+          (cacoo:api-clear-cancel)
+          (unless cacoo:api-cancel-flag
+            (anything anything-c-source-cacoo))))
+      (deferred:error it
+        (lambda (e) (message "Error : %s" e)))
+      (deferred:nextc it
+        (lambda (x)
+          (setq cacoo:api-cancel-flag t)
+          (ad-deactivate-regexp "cacoo:anything")
+          (cacoo:anything-cleanup)))))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; for test
 
+;; (setq cacoo:process-num 1)
 ;; (setq cacoo:png-background nil)
 ;; (setq cacoo:png-background "white")
 ;; (setq cacoo:debug t)
 ;; (setq cacoo:debug nil)
 ;; (setq cacoo:plugins nil)
+;; (eval-current-buffer)
+
+; (cacoo:debug-report-semaphore)
+; (cacoo:anything-command)
+; (cacoo:anything-cache-clear)
 
 (provide 'cacoo)
 ;;; cacoo.el ends here
