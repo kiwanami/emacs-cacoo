@@ -179,7 +179,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customize variables
 
-(defvar cacoo:api-key "y6KlL0PdnxBc5QNOln7N" "Set your API key!")
+(defvar cacoo:api-key "APIKEY" "Set your API key!")
 
 
 (defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]*$" "Markup regexp for searching diagrams.")
@@ -189,7 +189,7 @@
 (defvar cacoo:img-dir ".cimg" "Directory name for cache files.")
 (defvar cacoo:img-dir-ok nil "If non-nil, this program does not confirm creating a cache directory.")
 
-(defvar cacoo:process-num 1 "Maximum external process number")
+(defvar cacoo:process-num 4 "Maximum external process number")
 (defvar cacoo:cmd-copy "cp" "Copy command")
 (defvar cacoo:copy-by-command t "If non-nil, this program copies files by the external command asynchronously. If nil, this program uses Emacs copy function `copy-file' synchronously.")
 
@@ -562,6 +562,8 @@
   (destructuring-bind (event (url)) args
     (cacoo:fix-directory)
     (cond
+     ((cacoo:plugin-url-p url) ; plugins
+      (cacoo:load-diagram-plugin url))
      ((string-match "^file:\\/\\/\\/" url) ; local
       (cacoo:load-diagram-local url))
      ((string-match "^https?:\\/\\/" url) ; web
@@ -570,6 +572,23 @@
       (cacoo:load-diagram-local url)))))
 
 ;;; Create Original Image Cache
+
+(defun cacoo:load-diagram-plugin(url)
+  (lexical-let ((url url) (cache-path (cacoo:get-cache-path-from-url url)))
+    (cond
+     ((cacoo:file-exists-p cache-path)
+      (cacoo:log ">>   found cache file : %s" cache-path)
+      (cacoo:image-wp-set-original url cache-path))
+     ((cacoo:plugin-creator-get url)
+      (deferred:$
+        (funcall (cacoo:plugin-creator-get url))
+        (deferred:nextc it
+          (lambda (x) (cacoo:image-wp-set-original url cache-path)))
+        (deferred:error it
+          (lambda (e) (cacoo:image-wp-set-original url (cons 'error e))))))
+     (t
+      (cacoo:image-wp-set-original 
+       url (cons 'error (format "Can not found plugin creator. (BUG) %S" url)))))))
 
 (defun cacoo:load-diagram-remote(url)
   (cacoo:log ">> cacoo:load-diagram-remote : %s" url)
@@ -597,9 +616,10 @@
 
 (defun cacoo:load-diagram-local(url)
   (cacoo:log ">> cacoo:load-diagram-local : %s" url)
-  (let* ((url url)
-         (from-path (cacoo:get-local-path-from-url url))
-         (cache-path (cacoo:get-cache-path-from-url filename)))
+  (lexical-let
+      ((url url)
+       (from-path (cacoo:get-local-path-from-url url))
+       (cache-path (cacoo:get-cache-path-from-url url)))
     (cond
      ((cacoo:file-exists-p cache-path)
       (cacoo:log ">>   found cache file : %s" cache-path)
@@ -663,30 +683,32 @@
 
 (defun cacoo:resize-diagram-convert (url max-size filename)
   (cacoo:log ">> cacoo:resize-diagram-convert : %s / %s" url max-size)
-  (lexical-let ((url url) (max-size max-size))
-    (deferred:$
-      (deferred:succeed filename)
-      (cacoo:image-wp-acquire-semaphore-d (cons url max-size) it)
-      (cacoo:identify-diagram-d it)
-      (deferred:nextc it
-        (lambda (org-size)
-          (let ((resize-path (cacoo:get-resize-path-from-url url max-size))
-                (not-resizep (< org-size max-size)))
-            (cond
-             ((cacoo:file-exists-p resize-path)
-              (cacoo:log ">>   found cache file : %s" resize-path)
-              (cacoo:image-wp-set-resized url max-size resize-path))
-             ((= 0 org-size)
-              (cacoo:image-wp-set-resized 
-               url max-size (cons 'error (format "Can not copy file %s" url))))
-             (cacoo:png-background
-              (cacoo:resize-diagram-for-fillbg url max-size not-resizep))
-             (t
-              (cacoo:resize-diagram-for-transparent url max-size not-resizep)))
-            nil)))
-      (deferred:error it
-        (lambda (e) (cacoo:image-wp-set-resized url max-size (cons 'error e))))
-      (cacoo:image-wp-release-semaphore-d it (cons url max-size)))))
+  (lexical-let ((url url) (max-size max-size) (filename filename)
+                (resize-path (cacoo:get-resize-path-from-url url max-size)))
+    (cond
+     ((cacoo:file-exists-p resize-path)
+      (cacoo:log ">>   found cache file : %s" resize-path)
+      (cacoo:image-wp-set-resized url max-size resize-path))
+     (t
+      (deferred:$
+        (deferred:succeed filename)
+        (cacoo:image-wp-acquire-semaphore-d (cons url max-size) it)
+        (cacoo:identify-diagram-d it)
+        (deferred:nextc it
+          (lambda (org-size)
+            (let ((not-resizep (< org-size max-size)))
+              (cond
+               ((= 0 org-size)
+                (cacoo:image-wp-set-resized 
+                 url max-size (cons 'error (format "Can not copy file %s" url))))
+               (cacoo:png-background
+                (cacoo:resize-diagram-for-fillbg url max-size not-resizep))
+               (t
+                (cacoo:resize-diagram-for-transparent url max-size not-resizep)))
+              nil)))
+        (deferred:error it
+          (lambda (e) (cacoo:image-wp-set-resized url max-size (cons 'error e))))
+        (cacoo:image-wp-release-semaphore-d it (cons url max-size)))))))
 
 (defun cacoo:resize-diagram-for-transparent (url max-size not-resizep)
   (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / not-resize: %s" 
@@ -829,7 +851,7 @@
         ((string-match "^https?:\\/\\/" url)
          (cacoo:edit-next-diagram-command)
          pos-end)
-        (t ; 相対パスを仮定
+        (t ; assuming a relative path.
          (cacoo:view-original-cached-image
           (cacoo:$img-cached-file data))
          pos-end))))))
@@ -912,17 +934,20 @@
       (error "cacoo:img-regexp is not regexp pattern. [%s]" cacoo:img-regexp)))))
 
 (defun cacoo:try-plugins (start end content)
-  ;;プラグインを試してみる
+  "[internal] If a plugin handles the region, return an image
+object of structure `cacoo:$img'. Otherwise return nil."
   (loop for i in cacoo:plugins
-        for data = (funcall i start end content)
-        if data 
-        return data
+        for (data . creator) = (funcall i start end content)
+        if data
+        return (progn
+                 (cacoo:plugin-creator-add (cacoo:$img-url data) creator)
+                 data)
         finally return nil))
 
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; Cacoo API
+;;; High level API 
 
 (defun cacoo:image-search-forward ()
   (cacoo:image-search))
@@ -937,12 +962,12 @@
           ((start (match-beginning 0)) (end (match-end 0))
            (content (substring-no-properties (match-string 1))) data)
         (setq data 
-              (cacoo:aif 
-                  (cacoo:try-plugins start end content) it 
+              (cacoo:aif (cacoo:try-plugins start end content) it 
                 (let* ((cols (split-string content "[ \t]+"))
                        (url (car cols))
                        (size (cacoo:aif (cadr cols)
-                                 (string-to-number it) cacoo:max-size)))
+                                 (string-to-number it) 
+                               cacoo:max-size)))
                   (make-cacoo:$img :url url :start start :end end :size size))))
         (funcall action data)
         (goto-char end)))
@@ -1017,6 +1042,7 @@
   ;;キャッシュフォルダの中身を空にする
   (when (yes-or-no-p "Delete all local cache files?")
     (cacoo:clear-all-cache-files)
+    (cacoo:plugin-creator-clear)
     (message "Delete all local cache files.")))
 
 (defun cacoo:reload-next-diagram-command ()
@@ -1042,6 +1068,7 @@
 
 (defun cacoo:reload-all-diagrams-command ()
   (interactive)
+  (cacoo:plugin-creator-clear)
   ;;バッファ内のすべての図を更新する
   (save-excursion
     (goto-char (point-min))
@@ -1065,6 +1092,7 @@
 
 (defun cacoo:display-all-diagrams-command () 
   (interactive)
+  (cacoo:plugin-creator-clear) 
   ;;バッファ内のすべての図を表示する
   ;;キャッシュがあればそれを使う
   (save-excursion
@@ -1177,11 +1205,13 @@
 
 (defun cacoo:minor-mode-setup ()
   (cacoo:image-wp-init)
+  (cacoo:plugin-creator-clear)
   (cacoo:display-all-diagrams-command)
   (cacoo:api-retrieve-diagrams-d))
 
 (defun cacoo:minor-mode-abort ()
   (cacoo:display-diagram-overlay-clear)
+  (cacoo:plugin-creator-clear)
   (cacoo:revert-all-diagrams-command))
 
 (defun toggle-cacoo-minor-mode ()
@@ -1217,6 +1247,47 @@
   cacoo:minor-mode-menu-spec)
 (easy-menu-add cacoo-menu-map cacoo-minor-mode-keymap)
 
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; plugin actions in the image workplace
+
+(defvar cacoo:plugin-creator-alist nil
+  "[internal] Plugin creator alist. (url -> creator object)")
+(make-variable-buffer-local 'cacoo:plugin-creator-alist)
+
+(defun cacoo:plugin-creator-add (url creator-d)
+  "[internal] Add an entry of plugin to the creator alist
+`cacoo:plugin-creator-alist'. If an entry has already existed,
+this function replaces the creator object."
+  (cond
+   ((assoc url cacoo:plugin-creator-alist)
+    (setf (assoc url cacoo:plugin-creator-alist) (cons url creator-d)))
+   (t
+    (push (cons url creator-d) cacoo:plugin-creator-alist)))
+  nil)
+
+(defun cacoo:plugin-creator-clear ()
+  "[internal] Clear the plugin creator alist `cacoo:plugin-creator-alist'."
+  (setq cacoo:plugin-creator-alist nil))
+
+(defun cacoo:plugin-creator-get (url)
+  "[internal] Return a creator object corresponding to the
+URL. This function is used in the image workplace."
+  (cdr (assoc url cacoo:plugin-creator-alist)))
+
+(defun cacoo:plugin-url-p (url)
+  "[internal] Return non-nil if URL should be handled by plugin creators.
+This function is used in the image workplace."
+  (string-match "^plugin:\\/\\/" url))
+
+(defun cacoo:plugin-url-create (plugin-name image-filename)
+  "[internal] Return a plugin url. This function is used in the
+image workplace."
+  (format "plugin://%s/%s/%s" plugin-name 
+          (file-name-nondirectory (buffer-file-name)) 
+          image-filename))
 
 
 
@@ -1639,7 +1710,6 @@
         (lambda (e) (message "Error : %s" e)))
       (deferred:nextc it
         (lambda (x)
-          (setq cacoo:api-cancel-flag t)
           (ad-deactivate-regexp "cacoo:anything")
           (cacoo:anything-cleanup)))))))
 
@@ -1649,6 +1719,7 @@
 ;; for test
 
 ;; (setq cacoo:process-num 1)
+;; (setq cacoo:process-num 4)
 ;; (setq cacoo:png-background nil)
 ;; (setq cacoo:png-background "white")
 ;; (setq cacoo:debug t)
@@ -1656,9 +1727,9 @@
 ;; (setq cacoo:plugins nil)
 ;; (eval-current-buffer)
 
-; (cacoo:debug-report-semaphore)
-; (cacoo:anything-command)
-; (cacoo:anything-cache-clear)
+;; (cacoo:debug-report-semaphore)
+;; (cacoo:anything-command)
+;; (cacoo:anything-cache-clear)
 
 (provide 'cacoo)
 ;;; cacoo.el ends here
