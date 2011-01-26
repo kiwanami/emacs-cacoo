@@ -1,6 +1,6 @@
 ;;; cacoo.el --- Minor mode for Cacoo (http://cacoo.com)
 
-;; Copyright (C) 2010  SAKURAI Masashi
+;; Copyright (C) 2010, 2011  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
 ;; Version: 1.7
@@ -206,6 +206,9 @@
 (defvar cacoo:http-get-stdout-cmd '("wget" "-q" "-O" "-" url))
 
 ;;; Internal variables
+
+(defvar cacoo:version nil "version number")
+(setq cacoo:version "1.7")
 
 (defvar cacoo:api-url-base "https://cacoo.com/api/v1/" "[internal] Cacoo API base URL.")
 
@@ -1263,7 +1266,7 @@ object of structure `cacoo:$img'. Otherwise return nil."
 this function replaces the creator object."
   (cond
    ((assoc url cacoo:plugin-creator-alist)
-    (setf (assoc url cacoo:plugin-creator-alist) (cons url creator-d)))
+    (setcdr (assoc url cacoo:plugin-creator-alist) creator-d))
    (t
     (push (cons url creator-d) cacoo:plugin-creator-alist)))
   nil)
