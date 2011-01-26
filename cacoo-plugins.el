@@ -1,6 +1,6 @@
 ;;; cacoo-plugins.el --- plugins for cacoo.el
 
-;; Copyright (C) 2010  SAKURAI Masashi
+;; Copyright (C) 2010, 2011  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
 ;; Keywords: 
@@ -50,6 +50,8 @@
       (cacoo:plugin-long-url-gen 
        start end content url filename size))))
 
+(push 'cacoo:plugin-long-url cacoo:plugins)
+
 (defun cacoo:plugin-long-url-gen (start end content url filename size)
   (save-excursion
     (goto-char end)
@@ -67,15 +69,15 @@
              :url (cacoo:plugin-url-create 'long-url filename)
              :start start :end t-end
              :size (cacoo:aif size (string-to-number it) 
-                     cacoo:max-size)))
-           (lexical-let ((rurl rurl))
-             (lambda ()
-               (deferred:$
-                 (cacoo:http-get-d
-                  nil rurl (cacoo:get-cache-path filename))
-                 (deferred:nextc it
-                   (lambda (err)
-                     (cacoo:log ">>   http response : %s" err))))))))))
+                     cacoo:max-size))
+            (lexical-let ((rurl rurl) (filename filename))
+              (lambda ()
+                (deferred:$
+                  (cacoo:http-get-d
+                   nil rurl (cacoo:get-cache-path filename))
+                  (deferred:nextc it
+                    (lambda (err)
+                      (cacoo:log ">>   http response : %s" err)))))))))))
 
 (defun cacoo:plugin-url-encode-string (str)
   (let ((array (string-to-vector str)))
@@ -89,6 +91,107 @@
              (char-to-string ch))
             (t
              (format "%%%02X" ch)))) nil)))
+
+;; ** UML埋め込みのプラグイン
+;; [img:UML (filename) (size:省略可)]
+;; UML記述 (http://yuml.me/)
+;; <<<
+
+(defvar cacoo:plugin-class-regexp "^UML \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+
+(defun cacoo:plugin-class-diagram (start end content)
+  (when (string-match cacoo:plugin-class-regexp content)
+    (let ((url "http://yuml.me/diagram/scruffy/class/<<<")
+          (filename (match-string 1 content))
+          (size (match-string 2 content)))
+      (cacoo:plugin-long-url-gen 
+       start end content url filename size))))
+
+(push 'cacoo:plugin-class-diagram cacoo:plugins)
+
+;; ** シーケンス図埋め込みのプラグイン
+;; [img:SEQ (filename) (size:省略可)]
+;; シーケンス図記述 (http://www.websequencediagrams.com/)
+;; <<<
+
+(defvar cacoo:plugin-seq-regexp "SEQ \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+
+(defun cacoo:plugin-seq-diagram (start end content)
+  (when (string-match cacoo:plugin-seq-regexp content)
+    (let ((filename (match-string 1 content))
+          (size (match-string 2 content)))
+      (save-excursion
+        (goto-char end)
+        (and (re-search-forward cacoo:plugin-long-url-terminator)
+             (let* ((t-start (match-beginning 0))
+                    (t-end (match-end 0))
+                    (text (buffer-substring (1+ end) (1- t-start))))
+               (cons
+                (make-cacoo:$img
+                 :url (cacoo:plugin-url-create 'seq-diagram filename)
+                 :start start :end t-end
+                 :size (cacoo:aif size (string-to-number it)
+                         cacoo:max-size))
+                (lexical-let ((text text) (filename filename))
+                  (lambda () (cacoo:plugin-seq-diagram-get 
+                              text (cacoo:get-cache-path filename)))))))))))
+
+(defun cacoo:plugin-seq-diagram-get (text filename)
+  (lexical-let ((base-url "http://www.websequencediagrams.com/")
+                (text text) (filename filename))
+    (deferred:$
+      (deferred:url-post base-url `((message ,text) (style "default")))
+      (deferred:nextc it
+        (lambda (buf) 
+          (let* ((line (unwind-protect
+                           (with-current-buffer buf (buffer-string))
+                         (kill-buffer buf)))
+                 (url (if (string-match "\\?img=[a-zA-Z0-9]+" line)
+                          (concat base-url (match-string 0 line)))))
+            (cacoo:log "seq-diagram[%s] : GET -> %s" filename url)
+            (cacoo:http-get-d nil url filename))))
+      (deferred:watch it
+        (lambda () (cacoo:log "seq-diagram[%s] : OK" filename))))))
+
+(push 'cacoo:plugin-seq-diagram cacoo:plugins)
+
+;; ** はてなフォトライフ記法のプラグイン
+;; [f:id:(hatena id):(image id)(ext):image]
+;; はてなフォトライフ記法の画像を取ってくるプラグイン
+;; 
+;; 使う場合は以下のように画像タグに[f:〜]を追加します。
+;; (setq cacoo:img-regexp 
+;;      '("\\[img:\\(.*\\)\\][^]\n\r]*$"
+;;        "\\[f:\\(.*\\)\\][^]\n\t]*$"))
+;; 
+
+(defvar cacoo:plugin-hatena-fotolife-regexp
+  "^\\id:\\([^:]+\\):\\([0-9]+\\)\\([jpg]\\):image")
+
+(defun cacoo:plugin-hatena-fotolife (start end content)
+  (when (string-match cacoo:plugin-hatena-fotolife-regexp content)
+    (let* ((hatena-id (match-string 1 content))
+           (image-id (match-string 2 content))
+           (ext-id (match-string 3 content))
+           (date-id (substring image-id 0 8))
+           (ext-name 
+            (cond
+             ((equal "j" ext-id) "jpg")
+             ((equal "p" ext-id) "png")
+             ((equal "g" ext-id) "gif")
+             (t (error "unknown ext-id [%s]" ext-id))))
+           (url (format "http://f.hatena.ne.jp/images/fotolife/k/%s/%s/%s.%s" 
+                        hatena-id date-id image-id ext-name))
+           (filename (format "hatena-%s-%s.%s" hatena-id image-id ext-name)))
+      (cons
+       (make-cacoo:$img
+        :url url :start start :end end
+        :size cacoo:max-size)
+       (lexical-let ((url url))
+         (lambda () (cacoo:load-diagram-remote url)))))))
+
+(push 'cacoo:plugin-hatena-fotolife cacoo:plugins)
+
 
 ;; ** コマンドライン起動埋め込みのプラグイン
 ;; [img:CMD "(command)" (filename) (size:省略可)]
@@ -166,6 +269,7 @@
        start end content "dot -Tpng %IN% -o %OUT%" filename size))))
 
 (push 'cacoo:plugin-dot-diagram cacoo:plugins)
+
 
 ;; ** SVG
 ;; [img:SVG (filename) (size:省略可)]
