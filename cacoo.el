@@ -161,18 +161,15 @@
 ;; Revision 1.0  2010/05/07  sakurai
 ;; Initial revision
 
-
-;; * memo
-;; anything-integration
-;; get image by api
-;; plugins
-
 ;;; Code:
 
 (eval-when-compile (require 'cl))
 (require 'url-file)
 (require 'concurrent)
 (require 'json)
+
+(defvar cacoo:version nil "version number")
+(setq cacoo:version "1.7")
 
 
 
@@ -207,9 +204,6 @@
 
 ;;; Internal variables
 
-(defvar cacoo:version nil "version number")
-(setq cacoo:version "1.7")
-
 (defvar cacoo:api-url-base "https://cacoo.com/api/v1/" "[internal] Cacoo API base URL.")
 
 (defvar cacoo:base-url "https://cacoo.com/diagrams/" "[internal] The base URL in Cacoo")
@@ -220,12 +214,15 @@
 
 (defvar cacoo:plugins nil "[internal] A list of plugin symbols.")
 
+(defvar cacoo:process-semaphore nil "[internal] Semaphore object for external processes. The number of processes is controlled by `cacoo:process-num'.")
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Fundamental Functions
 
 (defmacro cacoo:aif (test-form then-form &rest else-forms)
+  (declare (debug (form form &rest form)))
   `(let ((it ,test-form))
      (if it ,then-form ,@else-forms)))
 (put 'cacoo:aif 'lisp-indent-function 2)
@@ -251,6 +248,7 @@
 (defvar cacoo:debug-count 0 "[internal] Debug output counter.") ; debug
 
 (defmacro cacoo:log (&rest args)
+  "[internal] Debug macro."
   (when cacoo:debug
     `(progn 
        (with-current-buffer (get-buffer-create "*cacoo:debug*")
@@ -260,24 +258,28 @@
        (incf cacoo:debug-count))))
 
 (defun cacoo:message-mark ()
+  "[internal] Debug marker."
   (interactive)
   (cacoo:log "==================== mark ==== %s" 
              (format-time-string "%H:%M:%S" (current-time))))
 
 (defun cacoo:debug-report-semaphore ()
+  "[internal] Show current status of semaphores."
   (interactive)
   (message
    "Semaphore: process permits: %s / waiting: %s  preview permit: %s / waiting: %s"
-   (cc:semaphore-permits cacoo:image-wp-process-semaphore)
-   (length (cc:semaphore-waiting-deferreds cacoo:image-wp-process-semaphore))
+   (cc:semaphore-permits cacoo:process-semaphore)
+   (length (cc:semaphore-waiting-deferreds cacoo:process-semaphore))
    (cc:semaphore-permits cacoo:preview-semaphore)
    (length (cc:semaphore-waiting-deferreds cacoo:preview-semaphore))))
 
 (defmacro cacoo:api-debug-deferred (d msg &rest args)
+  "[internal] Debug message output of deferred tasks."
   `(deferred:nextc ,d
      (lambda (x) (funcall 'message ,msg ,@args) x)))
 
 (defun cacoo:api-debug-dbuffer (d)
+  "[internal] Debug pp output of deferred tasks."
   (deferred:nextc d
     (lambda (x)
       (pop-to-buffer
@@ -290,14 +292,18 @@
 
 ;;; File Utilities
 
-(defun cacoo:get-cache-dir() 
+(defun cacoo:get-cache-dir()
+  "[internal] Return the cache directory for current buffer. If
+current buffer does not have visiting file, return
+`default-directory'."
   (let* ((base-dir (file-name-directory 
                     (or buffer-file-name
                         default-directory))))
     (expand-file-name cacoo:img-dir base-dir)))
 
 (defun cacoo:fix-directory ()
-  "Make a directory for cache files in the current directory which has visiting file."
+  "[internal] Make a directory for cache files in the current
+directory which has visiting file."
   (let* ((img-dir (cacoo:get-cache-dir)))
     (unless (file-directory-p img-dir)
       (when (or cacoo:img-dir-ok 
@@ -309,12 +315,17 @@
         (error "Could not create a image directory.")))
     img-dir))
 
-
 (defun cacoo:get-cache-path (filename)
+  "[internal] Return an absolute path for the cache file for
+FILENAME. FILENAME does not include directory path. If the cache
+directory does not exist, this function creates it."
   (expand-file-name 
    filename (cacoo:get-cache-dir)))
 
 (defun cacoo:get-resize-path (filename size)
+  "[internal] Return an absolute  path for the resized cache file for
+FILENAME. FILENAME does not include directory path. If the cache
+directory does not exist, this function creates it."
   (let ((ext (file-name-extension filename)))
     (expand-file-name
      (format "resize_%s_%s"
@@ -326,6 +337,8 @@
      (cacoo:get-cache-dir))))
 
 (defun cacoo:get-filename-from-url (url)
+  "[internal] Return a filename that does not include directory
+path from URL. URL can also be a local relative path."
   (cond
    ((string-match "^http" url)
     (url-file-nondirectory url))
@@ -334,13 +347,20 @@
         (match-string 0 url)))))
 
 (defun cacoo:get-cache-path-from-url (url)
+  "[internal] Return an absolute path for the cache of
+URL. If the cache directory does not exist, this function creates
+it."
   (cacoo:get-cache-path (cacoo:get-filename-from-url url)))
 
 (defun cacoo:get-resize-path-from-url (url size)
+  "[internal] Return an absolute path for the resized cache of
+URL. If the cache directory does not exist, this function creates
+it."
   (cacoo:get-resize-path (cacoo:get-filename-from-url url) size))
 
-
 (defun cacoo:get-local-path-from-url(url)
+  "[internal] Return an absolute path for the cache of URL for
+local filesystem."
   (cond
    ((string-match "^file://\\(.*\\)$" url) ; assuming full path
     (match-string 1 url))
@@ -349,26 +369,38 @@
    (t
     nil)))
 
-
 (defun cacoo:file-exists-p (file)
-  (and (file-exists-p file)
-       (< 0 (nth 7 (file-attributes file)))))
+  "[internal] Return non-nil, if FILE exists and the file size is
+larger than zero byte."
+  (cond
+   ((file-exists-p file)
+    (cond
+     ((< 0 (nth 7 (file-attributes file))) t)
+     (t (delete-file file) nil)))
+   (t nil)))
 
 (defun cacoo:get-image-type (file)
+  "[internal] Return the image type as symbol. This function
+guesses from the filename extension."
   (let ((type (intern (file-name-extension file))))
     (cond 
      ((eq type 'jpg) 'jpeg)
      (t type))))
 
 (defun cacoo:get-key-from-url (url)
+  "[internal] Return the key string of the cacoo diagram of
+URL. If URL has no key, return nil."
   (if (string-match cacoo:key-regexp url)
       (match-string 1 url)
     nil))
 
 (defun cacoo:make-url (tmpl-url key)
+  "[internal] Return an URL which is compiled from TMPL-URL and KEY."
   (if key (replace-regexp-in-string "%KEY%" key tmpl-url t) nil))
 
 (defun cacoo:list-template (template-list data-alist)
+  "[internal] Return an expanded list which is compiled
+TEMPLATE-LIST and DATA-ALIST."
   (loop for i in template-list
         collect
         (cond 
@@ -382,6 +414,7 @@
 ;;; Cacoo API Functions
 
 (defun cacoo:api-param-serialize (params)
+  "[internal] Return an serialized string for URL in which PARAMS are encoded."
   (cond
    (params
     (mapconcat
@@ -391,64 +424,69 @@
      "&"))
    (t "")))
 
-(defvar cacoo:api-cancel-flag nil "[internal]")
+(defvar cacoo:api-cancel-flag nil
+  "[internal] Global working state. The deferred tasks watch this variable.")
 
 (defun cacoo:api-get-d (method &optional params)
+  "[internal] Return a deferred object which retrieves a JSON
+data via cacoo API. The next deferred receives an alist that is
+parsed as JSON. If something is wrong, `nil' is passed."
   (lexical-let
       ((url (concat cacoo:api-url-base method ".json"
                     "?" (cacoo:api-param-serialize
                          (cons (cons 'apiKey cacoo:api-key)
                                params)))))
-    (deferred:$
-      (cacoo:image-wp-acquire-semaphore-d url)
-      (deferred:nextc it
-        (lambda (x)
-          (unless cacoo:api-cancel-flag
-            (deferred:$
-              (apply 'deferred:process 
-                     (cacoo:list-template 
-                      cacoo:http-get-stdout-cmd `((url . ,url))))
-              (deferred:nextc it
-                (lambda (x)
-                  (let ((json-array-type 'list))
-                    (json-read-from-string x))))))))
-      (deferred:error it
-        (lambda (e) (message "API Error: %s" e) nil))
-      (cacoo:image-wp-release-semaphore-d it url))))
+    (cc:semaphore-with cacoo:process-semaphore
+      (lambda (x) 
+        (unless cacoo:api-cancel-flag
+          (deferred:$
+            (apply 'deferred:process 
+                   (cacoo:list-template 
+                    cacoo:http-get-stdout-cmd `((url . ,url))))
+            (deferred:nextc it
+              (lambda (x)
+                (let ((json-array-type 'list))
+                  (json-read-from-string x)))))))
+      (lambda (e)
+        (message "API Error: %s" e)))))
 
 (defun cacoo:http-get-apikey (url)
+  "[internal] Return a cacoo diagram key which is extracted from
+URL. If no key is found, return nil."
   (if (and cacoo:api-key
            (string-match (regexp-quote cacoo:api-url-base) url))
       (concat url "?" (cacoo:api-param-serialize
                        (list (cons 'apiKey cacoo:api-key))))
     url))
 
-(defun cacoo:http-get-d (d url output-path)
-  (lexical-let ((d d) (url (cacoo:http-get-apikey url))
+(defun cacoo:http-get-d (url output-path)
+  "[internal] Return a deferred object which retrieves a file via
+HTTP GET. The received file is saved as OUTPUT-PATH.  The next
+deferred object receives `nil' if receiving finishes normally.
+If something is wrong, the http-response text is passed."
+  (lexical-let ((url (cacoo:http-get-apikey url))
                 (output-path output-path))
-    (unless d (setq d (deferred:next 'identity)))
-    (deferred:$
-      (deferred:nextc d
-        (lambda (x) 
-          (cacoo:log "  >> URL %s" url)
-          (apply 'deferred:process
-                 (cacoo:list-template 
-                  cacoo:http-get-file-cmd 
-                  `((output-file . ,output-path) (url . ,url))))))
-      (deferred:nextc it
-        (lambda (response-text)
-          (cacoo:log "  >> RESPONSE : %s" response-text)
-          (let* ((headers (split-string response-text "[\r\n]+"))
-                 (response (car headers)))
-            (if (string-match "200" response)
-                nil 
-              (ignore-errors (delete-file output-path))
-              (cacoo:log "  >> RESPONSE : %s " response-text)
-              response))))
-      (deferred:error it
-        (lambda (err)
-          (cacoo:log "  >> HTTP GET Error : %s" err)
-          (format "Can not access / HTTP GET : %s" url))))))
+    (cacoo:log "  >> URL %s" url)
+    (deferred:try
+      (deferred:$
+        (apply 'deferred:process
+               (cacoo:list-template 
+                cacoo:http-get-file-cmd 
+                `((output-file . ,output-path) (url . ,url))))
+        (deferred:nextc it
+          (lambda (response-text)
+            (cacoo:log "  >> RESPONSE : %s" response-text)
+            (let* ((headers (split-string response-text "[\r\n]+"))
+                   (response (car headers)))
+              (if (string-match "200" response)
+                  nil 
+                (ignore-errors (delete-file output-path))
+                (cacoo:log "  >> RESPONSE : %s " response-text)
+                response)))))
+      :catch
+      (lambda (err)
+        (cacoo:log "  >> HTTP GET Error : %s" err)
+        (format "Can not access / HTTP GET : %s" url)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Struct
@@ -457,7 +495,7 @@
 ;; url          : URL for an image or relative path. It is also a key for the dataflow variable.
 ;; start        : Start point for a markup
 ;; end          : End point for a markup
-;; size         : Maximum image size along the long axis.
+;; size         : Maximum pixel size along the long axis.
 
 (defstruct cacoo:$img url start end size)
 
@@ -466,46 +504,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Image Workplace
 
-(defvar cacoo:image-wp-process-semaphore nil)
-
-(defun cacoo:image-wp-acquire-semaphore-d (log &optional d)
-  (cacoo:log "Semaphore: process permits: %s / waiting: %s"
-             (cc:semaphore-permits cacoo:image-wp-process-semaphore)
-             (length (cc:semaphore-waiting-deferreds cacoo:image-wp-process-semaphore)))
-  (cacoo:log "## SEMAPHORE ACQUIRE (%s)" log)
-  (cond
-   (d (deferred:nextc d 
-        (lambda (x) 
-          (lexical-let ((x x))
-            (deferred:nextc 
-              (cc:semaphore-acquire cacoo:image-wp-process-semaphore)
-              (lambda (y) 
-                (cacoo:log "## SEMAPHORE ACQUIRE -- (%s)" x)
-                x))))))
-   (t (cc:semaphore-acquire cacoo:image-wp-process-semaphore))))
-
-(defun cacoo:image-wp-release-semaphore-d (d log)
-  (lexical-let ((log log))
-    (deferred:nextc d
-      (lambda (x) 
-        (cacoo:log "Semaphore: process permits: %s / waiting: %s"
-                   (cc:semaphore-permits cacoo:image-wp-process-semaphore)
-                   (length (cc:semaphore-waiting-deferreds cacoo:image-wp-process-semaphore)))
-        (cacoo:log "## SEMAPHORE RELEASE (%s)" log)
-        (cc:semaphore-release cacoo:image-wp-process-semaphore)
-        x))))
 
 (defun cacoo:image-wp-resized-equal (a b)
+  "[internal] If the URL and image size of A is identical to ones of B, return non-nil."
   (and (string-equal (car a) (car b))
        (equal (cdr a) (cdr b))))
 
-(defvar cacoo:image-wp-original nil)
-(defvar cacoo:image-wp-resized  nil)
+(defvar cacoo:image-wp-original nil "[internal] Dataflow environment object for cache files.")
+(defvar cacoo:image-wp-resized  nil "[internal] Dataflow environment object for resized cache files.")
 (make-variable-buffer-local 'cacoo:image-wp-original)
 (make-variable-buffer-local 'cacoo:image-wp-resized)
 
 (defun cacoo:image-wp-init ()
-  (setq cacoo:image-wp-process-semaphore (cc:semaphore-create cacoo:process-num)
+  "[internal] Initialize image workplaces those are implemented by dataflow objects."
+  (setq cacoo:process-semaphore (cc:semaphore-create cacoo:process-num)
         cacoo:image-wp-original (cc:dataflow-environment nil 'equal)
         cacoo:image-wp-resized  (cc:dataflow-environment nil 'cacoo:image-wp-resized-equal))
   (cc:dataflow-connect cacoo:image-wp-original 'get-first 'cacoo:image-wp-create-original)
@@ -517,22 +529,33 @@
      cacoo:image-wp-resized  t (lambda (args) (cacoo:log "DF RSZ / %S" args)))))
 
 (defun cacoo:image-wp-get-resized-d (url size)
-  ;; deferredの引数には画像ファイル名が渡ってくる
+  "[internal] Return a deferred object to get the resized cache
+file from the image workplace. The next deferred object receives
+the image path."
   (cc:dataflow-get cacoo:image-wp-resized (cons url size)))
 
 (defun cacoo:image-wp-get-original-d (url)
-  ;; deferredの引数には画像ファイル名が渡ってくる
+  "[internal] Return a deferred object to get the cache file from
+the image workplace. The next deferred object receives the image
+path."
   (cc:dataflow-get cacoo:image-wp-original url))
 
 (defun cacoo:image-wp-set-resized (url size file)
+  "[internal] Bind the resized cache file to the cons pair (url . size) 
+in the image workplace. The waiting tasks will receive the notification of binding."
   (cc:dataflow-set cacoo:image-wp-resized
                    (cons (substring-no-properties url) size) file))
   
 (defun cacoo:image-wp-set-original (url file)
+  "[internal] Bind the cache file to the URL in the image
+workplace. The waiting tasks will receive the notification of
+binding."
   (cc:dataflow-set cacoo:image-wp-original 
                    (substring-no-properties url) file))
 
 (defun cacoo:image-wp-clear-cache (url)
+  "[internal] Clear the information related to URL from the image
+workplaces and delete the corresponding cache files."
   (cacoo:aif (cc:dataflow-get-sync cacoo:image-wp-original url)
       (progn
         (if (and (stringp it) (file-exists-p it))
@@ -556,12 +579,16 @@
 ;;; Event handling
 
 (defun cacoo:image-wp-create-resized (args)
-  ;; イベントから呼ばれて画像をリサイズしてWPに追加
+  "[internal] Event handler for `get-first' of
+`cacoo:image-wp-resized'. This handler resizes the image and
+registers it to the image workplace `cacoo:image-wp-resized'."
   (destructuring-bind (event ((url . size))) args
     (cacoo:resize-diagram url size)))
 
 (defun cacoo:image-wp-create-original (args)
-  ;; イベントから呼ばれて画像を取ってきてWPに追加
+  "[internal] Event handler for `get-first' of
+`cacoo:image-wp-original'. This handler gets the image and
+registers it to the image workplace `cacoo:image-wp-original'."
   (destructuring-bind (event (url)) args
     (cacoo:fix-directory)
     (cond
@@ -571,29 +598,37 @@
       (cacoo:load-diagram-local url))
      ((string-match "^https?:\\/\\/" url) ; web
       (cacoo:load-diagram-remote url))
-     (t ; 相対パスを仮定
+     (t ; relative path
       (cacoo:load-diagram-local url)))))
 
 ;;; Create Original Image Cache
 
 (defun cacoo:load-diagram-plugin(url)
+  "[internal] Make a resource by the plugin for URL and register it to the image workplace.
+If something is wrong, the error message is registered."
   (lexical-let ((url url) (cache-path (cacoo:get-cache-path-from-url url)))
     (cond
      ((cacoo:file-exists-p cache-path)
       (cacoo:log ">>   found cache file : %s" cache-path)
       (cacoo:image-wp-set-original url cache-path))
      ((cacoo:plugin-creator-get url)
-      (deferred:$
-        (funcall (cacoo:plugin-creator-get url))
-        (deferred:nextc it
-          (lambda (x) (cacoo:image-wp-set-original url cache-path)))
-        (deferred:error it
-          (lambda (e) (cacoo:image-wp-set-original url (cons 'error e))))))
+      (deferred:try
+        (deferred:$
+          (funcall (cacoo:plugin-creator-get url))
+          (deferred:nextc it
+            (lambda (x)
+              (if (cacoo:file-exists-p cache-path)
+                  (cacoo:image-wp-set-original url cache-path)
+                (error "Can not get the image file.")))))
+        :catch
+        (lambda (e) (cacoo:image-wp-set-original url (cons 'error e)))))
      (t
       (cacoo:image-wp-set-original 
        url (cons 'error (format "Can not found plugin creator. (BUG) %S" url)))))))
 
 (defun cacoo:load-diagram-remote(url)
+  "[internal] Retrieve a resource of URL and register it to the image workplace.
+If something is wrong, the error message is registered."
   (cacoo:log ">> cacoo:load-diagram-remote : %s" url)
   (lexical-let* ((cache-path (cacoo:get-cache-path-from-url url))
                  (url url))
@@ -603,21 +638,22 @@
       (cacoo:image-wp-set-original url cache-path))
      (t
       (cacoo:log ">>   http request : %s" url)
-      (deferred:$
-        (cacoo:image-wp-acquire-semaphore-d url)
-        (cacoo:http-get-d it url cache-path)
-        (deferred:nextc it
-          (lambda (err)
-            (cacoo:log ">>   http response : %s" err)
-            (cacoo:image-wp-set-original 
-             url (if (and (null err) (cacoo:file-exists-p cache-path)) cache-path
-                   (cons 'error err)))))
-        (deferred:error it
-          (lambda (msg)
-            (cacoo:image-wp-set-original url (cons 'error msg))))
-        (cacoo:image-wp-release-semaphore-d it url))))))
+      (cc:semaphore-with cacoo:process-semaphore
+        (lambda (x) 
+          (deferred:$
+            (cacoo:http-get-d url cache-path)
+            (deferred:nextc it
+              (lambda (err)
+                (cacoo:log ">>   http response : %s" err)
+                (cacoo:image-wp-set-original 
+                 url (if (and (null err) (cacoo:file-exists-p cache-path)) cache-path
+                       (cons 'error err)))))))
+        (lambda (e) 
+          (cacoo:image-wp-set-original url (cons 'error e))))))))
 
 (defun cacoo:load-diagram-local(url)
+  "[internal] Retrieve a resource of URL and register it to the image workplace.
+If something is wrong, the error message is registered."
   (cacoo:log ">> cacoo:load-diagram-local : %s" url)
   (lexical-let
       ((url url)
@@ -628,27 +664,26 @@
       (cacoo:log ">>   found cache file : %s" cache-path)
       (cacoo:image-wp-set-original url cache-path))
      (t
-      (deferred:$
-        (cacoo:image-wp-acquire-semaphore-d url)
-        (cacoo:copy-file-d it from-path cache-path)
-        (deferred:nextc it
-          (lambda (x) 
-            (cacoo:image-wp-set-original url cache-path)))
-        (deferred:error it
-          (lambda (msg) 
-            (cacoo:image-wp-set-original url
-             (cons 'error (format "Can not copy file %s -> %s" 
-                                  from-path cache-path)))))
-        (cacoo:image-wp-release-semaphore-d it url))))))
+      (cc:semaphore-with cacoo:process-semaphore
+        (lambda (x) 
+          (deferred:$
+            (cacoo:copy-file-d from-path cache-path)
+            (deferred:nextc it
+              (lambda (x) (cacoo:image-wp-set-original url cache-path)))))
+        (lambda (e) 
+          (cacoo:image-wp-set-original 
+           url (cons 'error (format "Can not copy file %s -> %s" from-path cache-path)))))))))
 
-(defun cacoo:copy-file-d (d from-path to-path)
-  (unless d (setq d (deferred:next 'identity)))
+(defun cacoo:copy-file-d (from-path to-path)
+  "[internal] Return a deferred object to copy a file
+asynchronously. If something is wrong, the copy task throws an
+error that should be caught by some errorback."
   (cacoo:log ">>   local copy : %s" from-path)
   (lexical-let ((from-path from-path) (to-path to-path))
     (deferred:$
       (if cacoo:copy-by-command
-          (deferred:processc d cacoo:cmd-copy from-path to-path)
-        (deferred:nextc d
+          (deferred:process cacoo:cmd-copy from-path to-path)
+        (deferred:next
           (lambda (x) (ignore-errors (copy-file from-path to-path t t)))))
       (deferred:nextc it
         (lambda (x) 
@@ -657,20 +692,25 @@
 
 ;;; Create Resized Image Cache
 
-(defun cacoo:identify-diagram-d (d)
-  (deferred:nextc d
-    (lambda (file)
-      (deferred:$
-        (deferred:process "identify" "-format" "%w %h" file)
-        (deferred:nextc it
-          (lambda (line)
-            (let* ((cols (split-string line " "))
-                   (width (string-to-number (car cols)))
-                   (height (string-to-number (cadr cols))))
-              (cacoo:log "SIZE %S > %s" line (max width height))
-              (max width height))))))))
+(defun cacoo:identify-diagram-d (filename)
+  "[internal] Return a deferred object to get image size. The next deferred object receives pixel size along the long axis."
+  (lexical-let ((filename filename))
+    (deferred:$
+      (deferred:process "identify" "-format" "%w %h" filename)
+      (deferred:nextc it
+        (lambda (line)
+          (let* ((cols (split-string line " "))
+                 (width (string-to-number (car cols)))
+                 (height (string-to-number (cadr cols))))
+            (cacoo:log "SIZE %S > %s" line (max width height))
+            (max width height)))))))
 
 (defun cacoo:resize-diagram (url max-size)
+  "[internal] Resize the cache file for URL with MAX-SIZE and
+register the resized file to the image workplace. This function
+gets the original cache file from the image workplace
+`cacoo:image-wp-original'. The actual resizing task is executed by
+the function `cacoo:resize-diagram-convert'."
   (cacoo:log ">> cacoo:resize-diagram : %s / %s" url max-size)
   (lexical-let ((url url) (max-size max-size))
     (deferred:$
@@ -685,6 +725,9 @@
             (cacoo:resize-diagram-convert url max-size x))))))))
 
 (defun cacoo:resize-diagram-convert (url max-size filename)
+  "[internal] Resize the cache file for URL with MAX-SIZE and
+register the resized file to the image workplace. This function
+is called by the function `cacoo:resize-diagram'."
   (cacoo:log ">> cacoo:resize-diagram-convert : %s / %s" url max-size)
   (lexical-let ((url url) (max-size max-size) (filename filename)
                 (resize-path (cacoo:get-resize-path-from-url url max-size)))
@@ -693,57 +736,53 @@
       (cacoo:log ">>   found cache file : %s" resize-path)
       (cacoo:image-wp-set-resized url max-size resize-path))
      (t
-      (deferred:$
-        (deferred:succeed filename)
-        (cacoo:image-wp-acquire-semaphore-d (cons url max-size) it)
-        (cacoo:identify-diagram-d it)
-        (deferred:nextc it
-          (lambda (org-size)
-            (let ((not-resizep (< org-size max-size)))
-              (cond
-               ((= 0 org-size)
-                (cacoo:image-wp-set-resized 
-                 url max-size (cons 'error (format "Can not copy file %s" url))))
-               (cacoo:png-background
-                (cacoo:resize-diagram-for-fillbg url max-size not-resizep))
-               (t
-                (cacoo:resize-diagram-for-transparent url max-size not-resizep)))
-              nil)))
-        (deferred:error it
-          (lambda (e) (cacoo:image-wp-set-resized url max-size (cons 'error e))))
-        (cacoo:image-wp-release-semaphore-d it (cons url max-size)))))))
+      (cc:semaphore-with cacoo:process-semaphore
+        (lambda (x) 
+          (deferred:$
+            (cacoo:identify-diagram-d filename)
+            (deferred:nextc it
+              (lambda (org-size)
+                (let ((not-resizep (< org-size max-size)))
+                  (cond
+                   ((= 0 org-size)
+                    (cacoo:image-wp-set-resized 
+                     url max-size (cons 'error (format "Can not copy file %s" url))))
+                   (cacoo:png-background
+                    (cacoo:resize-diagram-for-fillbg url max-size not-resizep))
+                   (t
+                    (cacoo:resize-diagram-for-transparent url max-size not-resizep)))
+                  nil)))))
+        (lambda (e) 
+          (cacoo:image-wp-set-resized url max-size (cons 'error e))))))))
 
 (defun cacoo:resize-diagram-for-transparent (url max-size not-resizep)
+  "[internal] Resize the cache file for URL by the later version of command `convert'."
   (cacoo:log ">> cacoo:resize-diagram-for-transparent : %s / %s / not-resize: %s" 
              url max-size not-resizep)
   (lexical-let
       ((url url) (max-size max-size)
        (cache-path (cacoo:get-cache-path-from-url url))
        (resize-path (cacoo:get-resize-path-from-url url max-size)))
-    (deferred:$
-      (cond 
-       ((and not-resizep
-             (equal (file-name-extension cache-path)
-                    (file-name-extension resize-path)))
-        (cacoo:copy-file-d nil cache-path resize-path))
-       (t
-        (deferred:$
-          (cacoo:image-wp-acquire-semaphore-d (cons url max-size))
-          (deferred:processc it
+    (deferred:try
+      (deferred:$
+        (if (and not-resizep
+                 (equal (file-name-extension cache-path)
+                        (file-name-extension resize-path)))
+            (cacoo:copy-file-d cache-path resize-path)
+          (deferred:process
             "convert" "-resize" (format "%ix%i" max-size max-size)
             "-transparent-color" "#ffffff"
             cache-path (concat (file-name-extension resize-path)
-                             ":" resize-path))
-          (cacoo:image-wp-release-semaphore-d it (cons url max-size)))))
-      (deferred:nextc it
-        (lambda (msg)
-          (if (cacoo:file-exists-p resize-path)
-              (cacoo:image-wp-set-resized url max-size resize-path))))
-      (deferred:error it
-        (lambda (msg) 
-          (cacoo:image-wp-set-resized url max-size
-           (cons 'error (format "Can not resize image %s -> %s" 
-                                cache-path resize-path))))))))
+                               ":" resize-path)))
+        (deferred:nextc it
+          (lambda (msg)
+            (if (cacoo:file-exists-p resize-path)
+                (cacoo:image-wp-set-resized url max-size resize-path)))))
+      :catch
+      (lambda (msg) 
+        (cacoo:image-wp-set-resized 
+         url max-size (cons 'error (format "Can not resize image %s -> %s" 
+                                           cache-path resize-path)))))))
 
 (defun cacoo:get-background-img-path (path)
   (expand-file-name
@@ -759,18 +798,16 @@
        resize-size 
        (tmpfile (cacoo:get-background-img-path cache-path)))
     (deferred:$
-      (cond
-       ((and not-resizep ; 小さい場合はコピー
+      (if (and not-resizep ; small
              (equal (file-name-extension cache-path)
                     (file-name-extension resize-path)))
-        (cacoo:copy-file-d nil cache-path resize-path))
-       (t ; 通常はリサイズする
+          (cacoo:copy-file-d cache-path resize-path)
         (deferred:process
           "convert" cache-path "-resize" (format "%ix%i" max-size max-size)
-          (concat (file-name-extension resize-path) ":" resize-path))))
-      (deferred:processc it ; 縮小した画像のサイズを取得
+          (concat (file-name-extension resize-path) ":" resize-path)))
+      (deferred:processc it ; get the resized image size
         "identify" "-format" "%wx%h" resize-path)
-      (deferred:nextc it ; 縮小した画像と同じサイズの背景画像を準備
+      (deferred:nextc it ; make a background image
         (lambda (dim) (deferred:process "convert" "-size" dim
                       (concat "xc:" cacoo:png-background) tmpfile)))
       (deferred:processc it "convert" tmpfile resize-path "-flatten" resize-path)
@@ -907,11 +944,11 @@
 ;;; Navigation
 
 (defun cacoo:image-search (&optional backward)
-  ;; バッファ上のポイント位置以降の画像のテキストパターンを
-  ;; re-search-forward（もしくはbackwardがnil以外の場合
-  ;; re-search-backward）で検索する。cacoo:img-regexpが文字列の場合は普
-  ;; 通に re-search-forward する。cacoo:img-regexpがリストの場合、複数
-  ;; のパターンが入っているものと見なして、一番近所のポイント位置を返す。
+  "[internal] Return the point of beginning of the image
+markup. If BACKWARD is non-nil, this function searches backward.
+If the value `cacoo:img-regexp' is a string, this function just
+uses it as a regexp.  If the value is a list of strings, this
+function trys all patterns and chooses the nearest point."
   (let ((f (if backward 're-search-backward 're-search-forward))
         (cmp (if backward '> '<)))
     (cond
@@ -1507,67 +1544,67 @@ image workplace."
       ((progress (apply 'concat
              (loop for i from 1 to total
                    collect (if (<= i current) "O" ".")))))
-    (deferred:nextc (or d (deferred:succeed))
+    (deferred:watch (or d (deferred:succeed))
       (lambda (x)
-        (cc:signal-send cacoo:anything-channel 'progress progress)
-        x))))
+        (cc:signal-send cacoo:anything-channel 'progress progress)))))
 
 (defun cacoo:preview-image-get-d (url)
   (cacoo:log ">> cacoo:preview-image-get-d : %s" url)
   (let ((image (cacoo:preview-image-cache-get-mru url)))
     (cond
-     (image
-      (deferred:succeed image))
+     (image (deferred:succeed image))
      (t
       (lexical-let
           ((url url) 
            (org-file (expand-file-name "_preview_org.png" cacoo:preview-temp-dir))
            (resized-file (expand-file-name "_preview_resized.png" cacoo:preview-temp-dir))
            (win (cacoo:preview-get-preview-window)))
-        (deferred:$
-          (cc:semaphore-interrupt-all cacoo:preview-semaphore)
-          (cacoo:preview-progress it 1 4)
-          (deferred:nextc it
-            (lambda (x)
-              (cc:signal-send cacoo:anything-channel 'image-load-start)
-              (cacoo:log ">>   http request : %s" url)
-              (cacoo:http-get-d nil url org-file)))
-          (cacoo:preview-progress it 3 4)
-          (deferred:nextc it
-            (lambda (err)
-              (cacoo:log ">>   http response : %s" err)
-              (if (and (null err) (cacoo:file-exists-p org-file)) 
-                  (deferred:process "identify" "-format" "%w %h" org-file)
-                (error err))))
-          (deferred:nextc it
-            (lambda (sizestr)
-              (let* ((ww (* (window-width win) (frame-char-width)))
-                     (wh (* (- (window-height win) 2) (frame-char-height)))
-                     (isize (mapcar 'string-to-int (split-string sizestr))))
-                (if (or (< ww (car isize)) (< wh (cadr isize)))
-                    (progn 
-                      (cacoo:preview-progress nil 4 4)
-                      (deferred:$
-                        (deferred:process
-                          "convert" "-resize" (format "%ix%i" ww wh)
-                          org-file (concat (file-name-extension resized-file) ":" resized-file))
-                        (deferred:nextc it (lambda (x) resized-file))))
-                  org-file))))
-          (deferred:nextc it
-            (lambda (ifile)
-              (clear-image-cache)
-              (let ((img (create-image (cacoo:preview-load-image-data ifile) 'png t)))
-                (cacoo:preview-image-cache-add url img)
-                img)))
-          (deferred:error it
-            (lambda (e) (cacoo:log "Preview Error : %s" e)))
-          (deferred:nextc it
-            (lambda (x)
-              (cc:semaphore-release cacoo:preview-semaphore)
-              (cc:signal-send cacoo:anything-channel 'image-load-finish)
-              (when (file-exists-p org-file) (ignore-errors (delete-file org-file)))
-              (when (file-exists-p resized-file) (ignore-errors (delete-file resized-file)))
-              x))))))))
+        (deferred:try
+          (deferred:$
+            (cc:semaphore-interrupt-all cacoo:preview-semaphore)
+            (cacoo:preview-progress it 1 4)
+            (deferred:nextc it
+              (lambda (x)
+                (cc:signal-send cacoo:anything-channel 'image-load-start)
+                (cacoo:log ">>   http request : %s" url)
+                (cacoo:http-get-d url org-file)))
+            (cacoo:preview-progress it 3 4)
+            (deferred:nextc it
+              (lambda (err)
+                (cacoo:log ">>   http response : %s" err)
+                (if (and (null err) (cacoo:file-exists-p org-file)) 
+                    (deferred:process "identify" "-format" "%w %h" org-file)
+                  (error err))))
+            (deferred:nextc it
+              (lambda (sizestr)
+                (let* ((ww (* (window-width win) (frame-char-width)))
+                       (wh (* (- (window-height win) 2) (frame-char-height)))
+                       (isize (mapcar 'string-to-int (split-string sizestr))))
+                  (if (or (< ww (car isize)) (< wh (cadr isize)))
+                      (progn 
+                        (cacoo:preview-progress nil 4 4)
+                        (deferred:$
+                          (deferred:process
+                            "convert" "-resize" (format "%ix%i" ww wh)
+                            org-file (concat (file-name-extension resized-file) ":" resized-file))
+                          (deferred:nextc it (lambda (x) resized-file))))
+                    org-file))))
+            (deferred:nextc it
+              (lambda (ifile)
+                (clear-image-cache)
+                (let ((img (create-image (cacoo:preview-load-image-data ifile) 'png t)))
+                  (cacoo:preview-image-cache-add url img)
+                  img))))
+          :catch
+          (lambda (e) (cacoo:log "Preview Error : %s" e))
+          :finally
+          (lambda (x)
+            (cc:semaphore-release cacoo:preview-semaphore)
+            (cc:signal-send cacoo:anything-channel 'image-load-finish)
+            (when (file-exists-p org-file)
+              (ignore-errors (delete-file org-file)))
+            (when (file-exists-p resized-file)
+              (ignore-errors (delete-file resized-file))))))))))
 
 (defun cacoo:preview-load-image-data (file)
   (let ((buf (find-file-noselect file t t)))
@@ -1725,8 +1762,13 @@ image workplace."
 ;; (setq cacoo:process-num 4)
 ;; (setq cacoo:png-background nil)
 ;; (setq cacoo:png-background "white")
+
 ;; (setq cacoo:debug t)
 ;; (setq cacoo:debug nil)
+
+;; (progn (toggle-debug-on-error 1) (setq deferred:debug-on-signal t))
+;; (progn (toggle-debug-on-error -1) (setq deferred:debug-on-signal nil))
+
 ;; (setq cacoo:plugins nil)
 ;; (eval-current-buffer)
 

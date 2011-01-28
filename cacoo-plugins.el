@@ -33,6 +33,8 @@
 
 ;;; Code:
 
+(setq cacoo:plugins nil)
+
 ;; ** 長文埋め込みのプラグイン
 ;; [img:* (url) (filename) (size:省略可)]
 ;; (長文)
@@ -74,10 +76,11 @@
               (lambda ()
                 (deferred:$
                   (cacoo:http-get-d
-                   nil rurl (cacoo:get-cache-path filename))
+                   rurl (cacoo:get-cache-path filename))
                   (deferred:nextc it
                     (lambda (err)
-                      (cacoo:log ">>   http response : %s" err)))))))))))
+                      (cacoo:log ">>   http response : %s" err)
+                      (error err)))))))))))
 
 (defun cacoo:plugin-url-encode-string (str)
   (let ((array (string-to-vector str)))
@@ -142,14 +145,14 @@
     (deferred:$
       (deferred:url-post base-url `((message ,text) (style "default")))
       (deferred:nextc it
-        (lambda (buf) 
+        (lambda (buf)
           (let* ((line (unwind-protect
                            (with-current-buffer buf (buffer-string))
                          (kill-buffer buf)))
                  (url (if (string-match "\\?img=[a-zA-Z0-9]+" line)
                           (concat base-url (match-string 0 line)))))
             (cacoo:log "seq-diagram[%s] : GET -> %s" filename url)
-            (cacoo:http-get-d nil url filename))))
+            (cacoo:http-get-d url filename))))
       (deferred:watch it
         (lambda () (cacoo:log "seq-diagram[%s] : OK" filename))))))
 
