@@ -1334,6 +1334,11 @@ image workplace."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Diagram Cache Controller
 
+(defun cacoo:api-default-url (diagram)
+  (if (equal "url" (cacoo:k 'security diagram))
+      (cacoo:k 'imageUrl diagram)
+    (cacoo:k 'imageUrlForApi diagram)))
+
 (defun cacoo:api-retrieve-sheets-d (diagram-json)
   (lexical-let ((diagram-json diagram-json))
     (deferred:$
@@ -1341,6 +1346,8 @@ image workplace."
       (deferred:nextc it
         (lambda (whole-json)
           (let ((sheets-json (cdr (assq 'sheets whole-json))))
+            (loop for i in sheets-json
+                  do (cacoo:preview-image-cache-expire (cacoo:api-default-url i)))
             (cons (cons 'sheets sheets-json) diagram-json)))))))
 
 (defun cacoo:api-diagrams-get-by-id (id diagrams-json)
@@ -1457,6 +1464,13 @@ image workplace."
 
 (defun cacoo:preview-image-cache-add (url image)
   (push (cons url image) cacoo:preview-image-cache) image)
+
+(defun cacoo:preview-image-cache-expire (url)
+  (setq cacoo:preview-image-cache
+        (loop for i in cacoo:preview-image-cache
+              for iurl = (car i)
+              unless (equal url iurl) 
+              collect i)))
 
 ;;; Preview Buffer
 
@@ -1688,10 +1702,12 @@ image workplace."
   '((name . "Image source")
     (candidates . cacoo:anything-collect-diagrams)
     (action 
+     ("Insert URL" 
+      . (lambda (x) 
+          (cacoo:anything-insert-and-display 
+           (cacoo:api-default-url (cdr x)))))
      ("Insert API URL" 
       . (lambda (x) (cacoo:anything-insert-and-display (cacoo:k 'imageUrlForApi (cdr x)))))
-     ("Insert Open URL" 
-      . (lambda (x) (cacoo:anything-insert-and-display (cacoo:k 'imageUrl (cdr x)))))
      ("Add URL to kill-ring" 
       . (lambda (x) (kill-new (cacoo:k 'imageUrl (cdr x)))))
      ("Show Detail (Browser)" 
