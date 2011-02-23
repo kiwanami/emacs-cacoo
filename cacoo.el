@@ -1613,9 +1613,10 @@ image workplace."
 
 (defvar cacoo:preview-window nil "[internal]")
 
-(defun cacoo:preview-get-preview-window ()
+(defun cacoo:preview-init-preview-window ()
   (let ((win (anything-window)))
-    (unless cacoo:preview-window
+    (unless (and cacoo:preview-window
+                 (window-live-p cacoo:preview-window))
       (setq cacoo:preview-window 
             (cond
              ((< (window-width win) (* 2 (window-height win)))
@@ -1627,12 +1628,15 @@ image workplace."
        (cacoo:preview-buffer-init "No Image...")))
     cacoo:preview-window))
 
+(defun cacoo:preview-get-preview-window ()
+  (and (window-live-p cacoo:preview-window)
+       cacoo:preview-window))
+
 (defvar cacoo:preview-semaphore (cc:semaphore-create 1) "[internal]")
 
 (defun cacoo:preview (title url)
   (cacoo:log "AT preview %s" url)
   (lexical-let ((url url) (title title))
-    (cacoo:preview-get-preview-window)
     (deferred:$
       (cacoo:preview-image-get-d url)
       (deferred:nextc it
@@ -1666,6 +1670,8 @@ image workplace."
 
 (defvar cacoo:preview-action-last-data nil)
 (defun cacoo:preview-action (data)
+  (unless cacoo:preview-window
+    (cacoo:preview-init-preview-window))
   (unless (eq cacoo:preview-action-last-data data)
     (setq cacoo:preview-action-last-data data)
     (let ((diagram (car data)) (sheet (cdr data)))
