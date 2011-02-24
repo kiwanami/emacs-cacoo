@@ -446,9 +446,7 @@ parsed as JSON. If something is wrong, `nil' is passed."
             (deferred:nextc it
               (lambda (x)
                 (let ((json-array-type 'list))
-                  (json-read-from-string x)))))))
-      (lambda (e)
-        (message "API Error: %s" e)))))
+                  (json-read-from-string x))))))))))
 
 (defun cacoo:http-get-apikey (url)
   "[internal] Return a cacoo diagram key which is extracted from
@@ -1247,7 +1245,12 @@ object of structure `cacoo:$img'. Otherwise return nil."
   (cacoo:image-wp-init)
   (cacoo:plugin-creator-clear)
   (cacoo:display-all-diagrams-command)
-  (cacoo:api-retrieve-diagrams-d))
+  (cacoo:api-diagrams-init-cache))
+
+(defun cacoo:api-diagrams-init-cache ()
+  ;;TODO: load the cache file
+  (setq cacoo:api-diagrams-cache-wp (cc:dataflow-environment))
+  (cacoo:api-retrieve-diagrams))
 
 (defun cacoo:minor-mode-abort ()
   (cacoo:display-diagram-overlay-clear)
@@ -1376,16 +1379,16 @@ image workplace."
         (cacoo:api-retrieve-sheets-d new-json)
       (deferred:succeed cached-json))))
 
-(defvar cacoo:api-diagrams-cache nil "[internal]")
+(defvar cacoo:api-diagrams-cache-wp nil "[internal]")
 
-(defun cacoo:api-retrieve-diagrams-d ()
-  (lexical-let ((sheet-counter 0) 
-                (diagrams-counter 1) 
-                (cache-backup cacoo:api-diagrams-cache)
+(defun cacoo:api-retrieve-diagrams ()
+  (lexical-let ((sheet-counter 0) (diagrams-counter 1) 
                 diagrams-number)
     (cacoo:api-prepare-cancel)
-    (setq cacoo:api-diagrams-cache nil)
-    (if cacoo:api-key
+    (cond
+     ((null cacoo:api-key)
+      (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams nil))
+     (t
       (deferred:$
         (cacoo:api-get-d "diagrams")
         (deferred:nextc it
@@ -1394,7 +1397,7 @@ image workplace."
               (setq diagrams-number (length diagrams-json))
               (cacoo:api-check-diagram-list-cache-d
                diagrams-json
-               cache-backup
+               nil ; TODO: previous json should be set
                (lambda (x) 
                  (incf sheet-counter (cacoo:k 'sheetCount x))
                  (message "Cacoo: Getting diagram and sheet informations... %s/%s" 
@@ -1404,18 +1407,17 @@ image workplace."
           (lambda (x)
             (cond
              (cacoo:api-cancel-flag
+              (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams nil)
               (message "Cacoo: Cancelled."))
              (t
-              (setq cacoo:api-diagrams-cache x)
-              (message "Cacoo: all sheets [%s] are collected." sheet-counter)))
-            x))
+              (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams x)
+              (message "Cacoo: all sheets [%s] are collected." sheet-counter)))))
         (deferred:error it
           (lambda (err) 
             (message "Cacoo: Can not retrieve diagram data by API. -> %s" err)
-            (setq cacoo:api-diagrams-cache 'error))))
-      (deferred:fail "Cacoo API key is nil."))))
+            (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams 'error))))))))
 
-; (cacoo:api-debug-dbuffer (cacoo:api-retrieve-diagrams-d))
+; (cacoo:api-debug-dbuffer (cacoo:api-retrieve-diagrams))
 
 ;;; Canceling asynchronous tasks
 
@@ -1675,7 +1677,7 @@ image workplace."
 
 (defun cacoo:anything-collect-diagrams ()
   (let (lines)
-    (loop for d in cacoo:api-diagrams-cache
+    (loop for d in (cc:dataflow-get-sync cacoo:api-diagrams-cache-wp 'diagrams)
           do
           (loop for s in (cdr (assq 'sheets d))
                 do
@@ -1728,40 +1730,50 @@ image workplace."
 
 ;;; Startup and Cleanup
 
+(defvar cacoo:anything-lock nil "[internal] ")
+
 (defun cacoo:anything-startup ()
   (cacoo:log "AT: startup")
-  (setq cacoo:preview-window nil)
-  (setq cacoo:anything-channel (cc:signal-channel 'cacoo:anything)))
+  (setq cacoo:anything-lock t
+        cacoo:preview-window nil
+        cacoo:anything-channel (cc:signal-channel 'cacoo:anything)))
 
 (defun cacoo:anything-cleanup ()
   (let ((buf (get-buffer cacoo:preview-buffer)))
     (when (and buf (buffer-live-p buf))
       (kill-buffer buf)))
+  (setq cacoo:anything-lock nil)
   (cc:signal-disconnect-all cacoo:anything-channel)
   (setq cacoo:anything-channel nil)
   (cacoo:log "AT: cleanup"))
 
 (defun cacoo:anything-cache-clear ()
   (interactive)
-  (setq cacoo:api-diagrams-cache nil
-        cacoo:preview-image-cache nil))
+  (cc:dataflow-clear cacoo:api-diagrams-cache-wp 'diagrams)
+  (cacoo:api-diagrams-init-cache)
+  (setq cacoo:preview-image-cache nil))
 
 ;;; Anything command
 
-(defun cacoo:anything-command (&optional arg)
-  (interactive "P")
+(defun cacoo:anything-command ()
+  (interactive)
   (cond
    ((null cacoo:api-key)
     (message "Get your Cacoo API key and set it `cacoo:api-key'."))
-   ((null cacoo:api-diagrams-cache)
-    (message "Now retrieving diagram data. Wait a moment."))
-   ((eq 'error cacoo:api-diagrams-cache)
-    (message "Can not retrieve diagram data. Check your network status and settings."))
+   (cacoo:anything-lock
+    (cacoo:log "cacoo:anything locked."))
    (t
+    (unless (cc:dataflow-get-sync cacoo:api-diagrams-cache-wp 'diagrams)
+      (message "Now retrieving diagram data. Wait a moment..."))
     (cacoo:anything-startup)
     (deferred:$
-      (if arg (cacoo:api-retrieve-diagrams-d)
-        (deferred:next 'identity))
+      (cc:dataflow-get cacoo:api-diagrams-cache-wp 'diagrams)
+      (deferred:nextc it
+        (lambda (x) 
+          (cond
+           ((eq 'error x)
+            (error "Can not retrieve diagram data. Check your network status and settings."))
+           (t x))))
       (deferred:nextc it
         (lambda (x) 
           (ad-activate-regexp "cacoo:anything")
@@ -1770,7 +1782,7 @@ image workplace."
             (anything anything-c-source-cacoo))))
       (deferred:error it
         (lambda (e) (message "Error : %s" e)))
-      (deferred:nextc it
+      (deferred:watch it
         (lambda (x)
           (ad-deactivate-regexp "cacoo:anything")
           (cacoo:anything-cleanup)))))))
