@@ -202,6 +202,9 @@
 (defvar cacoo:http-get-file-cmd '("wget" "-q" "-S" "--no-check-certificate" "-O" output-file url))
 (defvar cacoo:http-get-stdout-cmd '("wget" "-q" "-O" "-" url))
 
+(defvar cacoo:api-diagrams-cache-dir "~/.emacs.d/cacoo/" "Cache directory for Cacoo data.")
+(defvar cacoo:api-diagrams-cache-file "diagrams.dat" "Cache file for Cacoo diagrams.")
+
 ;;; Internal variables
 
 (defvar cacoo:api-url-base "https://cacoo.com/api/v1/" "[internal] Cacoo API base URL.")
@@ -1247,11 +1250,6 @@ object of structure `cacoo:$img'. Otherwise return nil."
   (cacoo:display-all-diagrams-command)
   (cacoo:api-diagrams-init-cache))
 
-(defun cacoo:api-diagrams-init-cache ()
-  ;;TODO: load the cache file
-  (setq cacoo:api-diagrams-cache-wp (cc:dataflow-environment))
-  (cacoo:api-retrieve-diagrams))
-
 (defun cacoo:minor-mode-abort ()
   (cacoo:display-diagram-overlay-clear)
   (cacoo:plugin-creator-clear)
@@ -1337,6 +1335,53 @@ image workplace."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Diagram Cache Controller
 
+(defun cacoo:api-diagrams-local-cache-load ()
+  "[internal] Read the diagram data from the local diagram cache file and return it.
+If the cache file not found, return nil."
+  (let ((file
+         (expand-file-name
+          cacoo:api-diagrams-cache-file
+          cacoo:api-diagrams-cache-dir)))
+    (when (file-exists-p file)
+      (let ((buf (find-file-noselect file)) ret)
+        (unwind-protect
+            (setq ret (read buf))
+          (kill-buffer buf))
+        ret))))
+
+(defun cacoo:api-diagrams-local-cache-save (diagrams)
+  "[internal] Save the diagram data into the local diagram cache file."
+  (unless (file-exists-p (expand-file-name cacoo:api-diagrams-cache-dir))
+    (make-directory (expand-file-name cacoo:api-diagrams-cache-dir) t))
+  (let ((buf (find-file-noselect
+              (expand-file-name
+               cacoo:api-diagrams-cache-file
+               cacoo:api-diagrams-cache-dir))))
+    (unwind-protect
+        (with-current-buffer buf
+          (erase-buffer)
+          (insert (prin1-to-string diagrams))
+          (save-buffer))
+      (kill-buffer buf))))
+
+;; (cacoo:api-diagrams-local-cache-save cacoo:api-diagrams-cache)
+;; (equal cacoo:api-diagrams-cache (cacoo:api-diagrams-local-cache-load))
+
+(defun cacoo:api-diagrams-local-cache-delete ()
+  "[internal] Delete local diagram cache file."
+  (let ((file (expand-file-name
+               cacoo:api-diagrams-cache-file
+               cacoo:api-diagrams-cache-dir)))
+    (when (file-exists-p file)
+      (delete-file file))))
+
+(defvar cacoo:api-diagrams-cache-wp nil "[internal] Data flow variable for the diagram data retrieved by the Cacoo API.")
+
+(defun cacoo:api-diagrams-init-cache ()
+  "[internal] Reset the data flow variable `cacoo:api-diagrams-cache-wp' and start retrieving diagram data by Cacoo API."
+  (setq cacoo:api-diagrams-cache-wp (cc:dataflow-environment))
+  (cacoo:api-retrieve-diagrams))
+
 (defun cacoo:api-default-url (diagram)
   (if (equal "url" (cacoo:k 'security diagram))
       (cacoo:k 'imageUrl diagram)
@@ -1379,10 +1424,9 @@ image workplace."
         (cacoo:api-retrieve-sheets-d new-json)
       (deferred:succeed cached-json))))
 
-(defvar cacoo:api-diagrams-cache-wp nil "[internal]")
-
 (defun cacoo:api-retrieve-diagrams ()
-  (lexical-let ((sheet-counter 0) (diagrams-counter 1) 
+  (lexical-let ((sheet-counter 0) (diagrams-counter 1)
+                (last-diagrams-json (cacoo:api-diagrams-local-cache-load))
                 diagrams-number)
     (cacoo:api-prepare-cancel)
     (cond
@@ -1397,25 +1441,28 @@ image workplace."
               (setq diagrams-number (length diagrams-json))
               (cacoo:api-check-diagram-list-cache-d
                diagrams-json
-               nil ; TODO: previous json should be set
-               (lambda (x) 
+               last-diagrams-json
+               (lambda (x)
                  (incf sheet-counter (cacoo:k 'sheetCount x))
-                 (message "Cacoo: Getting diagram and sheet informations... %s/%s" 
+                 (message "Cacoo: Getting diagram and sheet information... %s/%s" 
                           diagrams-counter diagrams-number)
                  (incf diagrams-counter))))))
         (deferred:nextc it
           (lambda (x)
             (cond
              (cacoo:api-cancel-flag
-              (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams nil)
-              (message "Cacoo: Cancelled."))
+              (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams 
+                               last-diagrams-json)
+              (message "Cacoo: Canceled."))
              (t
               (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams x)
+              (cacoo:api-diagrams-local-cache-save x)
               (message "Cacoo: all sheets [%s] are collected." sheet-counter)))))
         (deferred:error it
-          (lambda (err) 
+          (lambda (err)
             (message "Cacoo: Can not retrieve diagram data by API. -> %s" err)
-            (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams 'error))))))))
+            (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams 
+                             last-diagrams-json))))))))
 
 ; (cacoo:api-debug-dbuffer (cacoo:api-retrieve-diagrams))
 
@@ -1612,7 +1659,7 @@ image workplace."
                   (cacoo:preview-image-cache-add url img)
                   img))))
           :catch
-          (lambda (e) (cacoo:log "Preview Error : %s" e))
+          (lambda (e) (cacoo:log "Preview Error : %s" e) nil)
           :finally
           (lambda (x)
             (cc:semaphore-release cacoo:preview-semaphore)
@@ -1657,7 +1704,8 @@ image workplace."
       (cacoo:preview-image-get-d url)
       (deferred:nextc it
         (lambda (img)
-          (cc:signal-send cacoo:anything-channel 'show-image title url img)))
+          (when img
+            (cc:signal-send cacoo:anything-channel 'show-image title url img))))
       (deferred:error it
         (lambda (e) (message "Preview Error : %s" e))))))
 
@@ -1750,6 +1798,7 @@ image workplace."
 (defun cacoo:anything-cache-clear ()
   (interactive)
   (cc:dataflow-clear cacoo:api-diagrams-cache-wp 'diagrams)
+  (cacoo:api-diagrams-local-cache-delete)
   (cacoo:api-diagrams-init-cache)
   (setq cacoo:preview-image-cache nil))
 
