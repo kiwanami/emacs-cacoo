@@ -487,7 +487,7 @@ If something is wrong, the http-response text is passed."
       :catch
       (lambda (err)
         (cacoo:log "  >> HTTP GET Error : %s" err)
-        (format "Can not access / HTTP GET : %s" url)))))
+        (error (format "Can not access / HTTP GET : %s" url))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Struct
@@ -840,6 +840,7 @@ is called by the function `cacoo:resize-diagram'."
                 (start (cacoo:$img-start data))
                 (end (cacoo:$img-end data)))
     (cacoo:log ">> cacoo:display-diagram : %s / %s" (cacoo:$img-url data) (cacoo:$img-size data))
+    (cacoo:counter-add)
     (deferred:$
       (cacoo:image-wp-get-resized-d (cacoo:$img-url data) (cacoo:$img-size data))
       (deferred:nextc it
@@ -848,7 +849,9 @@ is called by the function `cacoo:resize-diagram'."
           (if (and x (consp x) (eq 'error (car x))) (error (cdr x))
             (cacoo:display-diagram-by-image x data))))
       (deferred:error it
-        (lambda (e) (cacoo:display-diagram-by-text start end e))))))
+        (lambda (e) (cacoo:display-diagram-by-text start end e)))
+      (deferred:watch it
+        (lambda (x) (cacoo:counter-burn))))))
 
 (defun cacoo:display-diagram-by-image (image-file data)
   (cacoo:log ">> cacoo:display-diagram-by-image : %s <- %s / %s"
@@ -949,7 +952,7 @@ is called by the function `cacoo:resize-diagram'."
 markup. If BACKWARD is non-nil, this function searches backward.
 If the value `cacoo:img-regexp' is a string, this function just
 uses it as a regexp.  If the value is a list of strings, this
-function trys all patterns and chooses the nearest point."
+function tries all patterns and chooses the nearest point."
   (let ((f (if backward 're-search-backward 're-search-forward))
         (cmp (if backward '> '<)))
     (cond
@@ -984,6 +987,33 @@ object of structure `cacoo:$img'. Otherwise return nil."
                  (cacoo:plugin-creator-add (cacoo:$img-url data) creator)
                  data)
         finally return nil))
+
+(defvar cacoo:counter (cons 0 0)
+  "[internal] The progress counter variable. (unsolved . solved)")
+
+(defun cacoo:counter-reset ()
+  "Rest the progress counter `cacoo:counter'."
+  (setq cacoo:counter (cons 0 0))
+  (cacoo:counter-report))
+
+(defun cacoo:counter-add ()
+  "Increase the unsolved number of progress counter."
+  (incf (car cacoo:counter))
+  (cacoo:counter-report))
+
+(defun cacoo:counter-burn ()
+  "Increase the solved number of progress counter."
+  (incf (cdr cacoo:counter))
+  (cacoo:counter-report))
+
+(defun cacoo:counter-report ()
+  "Display the progress counter."
+  (message "Cacoo: Progress  %s/%s  %s"
+           (car cacoo:counter) (cdr cacoo:counter)
+           (if (and
+                (< 0 (car cacoo:counter))
+                (equal (car cacoo:counter) (cdr cacoo:counter)))
+               "[complete]" "...")))
 
 
 
@@ -1071,31 +1101,31 @@ object of structure `cacoo:$img'. Otherwise return nil."
   (interactive)
   (cacoo:insert-pattern-url (current-kill 0)))
 
-(defun cacoo:view-local-cache-next-diagram-command () 
+(defun cacoo:view-local-cache-next-diagram-command ()
+  "View the original image with the local application."
   (interactive)
-  ;;原寸大の画像をローカルの環境で参照する
   (cacoo:do-next-diagram
    (lambda (data)
      (cacoo:view-original-cached-image (cacoo:$img-url data)))))
 
 (defun cacoo:clear-all-cache-files-command ()
+  "Remove all files in the cache directory."
   (interactive)
-  ;;キャッシュフォルダの中身を空にする
   (when (yes-or-no-p "Delete all local cache files?")
     (cacoo:clear-all-cache-files)
     (cacoo:plugin-creator-clear)
     (message "Delete all local cache files.")))
 
 (defun cacoo:reload-next-diagram-command ()
+  "Reload the next diagram."
   (interactive)
-  ;;カーソール直後の図をリロードする
+  (cacoo:counter-reset)
   (save-excursion
     (cacoo:reload-next-diagram)))
 
 (defun cacoo:reload-or-revert-current-diagram-command ()
+  "Toggle the display style between image and text on the current position."
   (interactive)
-  ;;カーソールのある図をリロードする
-  ;;(画像マーカーの先頭に移動してリロード)
   (save-excursion
     (cond
      ((get-text-property (point) 'display)
@@ -1105,64 +1135,69 @@ object of structure `cacoo:$img'. Otherwise return nil."
      (t
       (end-of-line)
       (cacoo:navi-prev-diagram-command)
+      (cacoo:counter-reset)
       (cacoo:reload-next-diagram)))))
 
 (defun cacoo:reload-all-diagrams-command ()
+  "Reload all images in the current buffer."
   (interactive)
   (cacoo:plugin-creator-clear)
-  ;;バッファ内のすべての図を更新する
+  (cacoo:counter-reset)
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:image-search-forward)
       (cacoo:clear-cache-next-diagram))
     (goto-char (point-min))
+    (cacoo:counter-reset)
     (while (cacoo:load-next-diagram))))
 
 (defun cacoo:revert-next-diagram-command ()
+  "Hide the image and display the original markup text."
   (interactive)
-  ;;カーソール直後の図をテキストに戻す
   (save-excursion
     (cacoo:revert-next-diagram)))
 
 (defun cacoo:revert-all-diagrams-command ()
+  "Hiding all images."
   (interactive)
-  ;;バッファ内のすべての図をテキストに戻す
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:revert-next-diagram))))
 
-(defun cacoo:display-all-diagrams-command () 
+(defun cacoo:display-all-diagrams-command ()
+  "Display all images."
   (interactive)
+  (cacoo:counter-reset)
   (cacoo:plugin-creator-clear) 
-  ;;バッファ内のすべての図を表示する
-  ;;キャッシュがあればそれを使う
   (save-excursion
     (goto-char (point-min))
     (while (cacoo:load-next-diagram))))
 
-(defun cacoo:display-next-diagram-command () 
+(defun cacoo:display-next-diagram-command ()
+  "Display the next image."
   (interactive)
-  ;;カーソール直後の図を表示する
-  ;;キャッシュがあればそれを使う
+  (cacoo:counter-reset)
   (save-excursion
     (cacoo:load-next-diagram)))
 
 (defun cacoo:create-new-diagram-command ()
+  "Open the cacoo editor for a new diagram with the web browser."
   (interactive)
-  ;;ブラウザで新規図を開く
   (cacoo:open-browser cacoo:new-url))
 
 (defun cacoo:open-diagram-list-command ()
+  "Open the list of cacoo diagrams with the web browser."
   (interactive)
-  ;;ブラウザで図の一覧を開く
   (cacoo:open-browser cacoo:list-url))
 
 (defun cacoo:edit-next-diagram-command ()
+  "Open the cacoo editor for the next diagram with the web browser."
   (interactive)
-  ;;カーソール直後の図をブラウザで編集する
   (cacoo:open-diagram-gen cacoo:edit-url))
 
 (defun cacoo:open-diagram-gen (tmpl-url)
+  "Open the url with the web browser.
+TMPL-URL is an URL template."
   ;;カーソール直後の図をブラウザで編集する
   (save-excursion
     (cacoo:do-next-diagram
@@ -1173,17 +1208,19 @@ object of structure `cacoo:$img'. Otherwise return nil."
          (cacoo:open-browser (or open-url url)))))))
 
 (defun cacoo:view-next-diagram-command ()
+  "Open the detail page for the next diagram with the web browser."
   (interactive)
-  ;;カーソール直後の図の詳細画面をブラウザで開く
   (cacoo:open-diagram-gen cacoo:view-url))
 
 (defun cacoo:navi-next-diagram-command ()
+  "Move to the next diagram."
   (interactive)
   (end-of-line)
   (if (cacoo:image-search-forward)
       (beginning-of-line)))
 
 (defun cacoo:navi-prev-diagram-command ()
+  "Move to the previous diagram."
   (interactive)
   (if (cacoo:image-search-backward)
       (beginning-of-line)))
