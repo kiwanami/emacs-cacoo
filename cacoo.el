@@ -35,13 +35,16 @@
 ;;; Installation:
 
 ;; This program is dependent on followings:
+;; - anything.el (http://www.emacswiki.org/emacs/Anything)
 ;; - deferred.el (http://github.com/kiwanami/emacs-deferred/raw/master/deferred.el)
 ;; - concurrent.el (http://github.com/kiwanami/emacs-deferred/raw/master/concurrent.el)
 ;; - wget, ImageMagick(convert, identify, display)
 
-;; Put cacoo.el in your load-path, and add following code.
+;; Put cacoo.el and cacoo-plugins.el in your load-path, and add following code.
 
 ;; (require 'cacoo)
+;; (require 'cacoo-plugins)      ; option
+;; (setq cacoo:api-key "APIKEY") ; option
 ;; (global-set-key (kbd "M--") 'toggle-cacoo-minor-mode) ; key bind example
 
 ;;; Usage:
@@ -181,7 +184,6 @@
 
 (defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]*$" "Markup regexp for searching diagrams.")
 (defvar cacoo:img-pattern "[img:%s]" "Pattern for inserting a markup")
-(defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)" "Regexp for extracting a diagram key in Cacoo.")
 
 (defvar cacoo:img-dir ".cimg" "Directory name for cache files.")
 (defvar cacoo:img-dir-ok nil "If non-nil, this program does not confirm creating a cache directory.")
@@ -195,10 +197,9 @@
 (defvar cacoo:external-viewer "display" "External viewer command. If nil, this program opens the image file in Emacs.")
 (defvar cacoo:png-background nil "If the transparent color of PNG images seems not to be good, set it non-nil.")
 
-(defvar cacoo:translation-exts '("eps" "ps") "A list of the extensions those need to translate to display in Emacs.")
+(defvar cacoo:translation-exts '("eps" "ps" "svg") "A list of the extensions those need to translate to display in Emacs.")
 (defvar cacoo:browser-function browse-url-browser-function "The browser to open the Cacoo editor.")
 
-(defvar cacoo:preview-temp-dir "/tmp" "A directory to save a preview image temporally.")
 (defvar cacoo:http-get-file-cmd '("wget" "-q" "-S" "--no-check-certificate" "-O" output-file url))
 (defvar cacoo:http-get-stdout-cmd '("wget" "-q" "-O" "-" url))
 
@@ -207,6 +208,7 @@
 
 ;;; Internal variables
 
+(defvar cacoo:key-regexp "diagrams\\/\\([a-zA-Z0-9]*\\)" "Regexp for extracting a diagram key in Cacoo.")
 (defvar cacoo:api-url-base "https://cacoo.com/api/v1/" "[internal] Cacoo API base URL.")
 
 (defvar cacoo:base-url "https://cacoo.com/diagrams/" "[internal] The base URL in Cacoo")
@@ -1676,8 +1678,8 @@ the local cache API functions, `cacoo:api-diagrams-local-cache-load' and
      (t
       (lexical-let
           ((url url) 
-           (org-file (expand-file-name "_preview_org.png" cacoo:preview-temp-dir))
-           (resized-file (expand-file-name "_preview_resized.png" cacoo:preview-temp-dir))
+           (org-file (expand-file-name "_preview_org.png" temporary-file-directory))
+           (resized-file (expand-file-name "_preview_resized.png" temporary-file-directory))
            (win (cacoo:preview-get-preview-window)))
         (deferred:try
           (deferred:$
