@@ -1205,9 +1205,7 @@ object of structure `cacoo:$img'. Otherwise return nil."
   (cacoo:open-diagram-gen cacoo:edit-url))
 
 (defun cacoo:open-diagram-gen (tmpl-url)
-  "Open the url with the web browser.
-TMPL-URL is an URL template."
-  ;;カーソール直後の図をブラウザで編集する
+  "Open the url with the web browser. TMPL-URL is an URL template."
   (save-excursion
     (cacoo:do-next-diagram
      (lambda (data) 
@@ -1328,12 +1326,10 @@ TMPL-URL is an URL template."
     "----"
     ["Clear all cache files" cacoo:clear-all-cache-files-command t]))
 
-
 (easy-menu-define cacoo-menu-map
   cacoo-minor-mode-keymap "Cacoo menu map" 
   cacoo:minor-mode-menu-spec)
 (easy-menu-add cacoo-menu-map cacoo-minor-mode-keymap)
-
 
 
 
@@ -1429,11 +1425,16 @@ If the cache file not found, return nil."
   (cacoo:api-retrieve-diagrams))
 
 (defun cacoo:api-default-url (diagram)
+  "[internal] Return the public URL of the diagram if the diagram is open. 
+Otherwise return the URL for API."
   (if (equal "url" (cacoo:k 'security diagram))
       (cacoo:k 'imageUrl diagram)
     (cacoo:k 'imageUrlForApi diagram)))
 
 (defun cacoo:api-retrieve-sheets-d (diagram-json)
+  "[internal] Return a deferred object that retrieves json data
+of sheets from Cacoo API and that appends the data to the given
+diagram data structure. This function is called by `cacoo:api-check-diagram-cache-d'."
   (lexical-let ((diagram-json diagram-json))
     (deferred:$
       (cacoo:api-get-d (format "diagrams/%s" (cacoo:k 'diagramId diagram-json)))
@@ -1445,11 +1446,14 @@ If the cache file not found, return nil."
             (cons (cons 'sheets sheets-json) diagram-json)))))))
 
 (defun cacoo:api-diagrams-get-by-id (id diagrams-json)
+  "[internal] Return the detail data of the diagram indicated by ID."
   (loop for i in diagrams-json
         if (equal (cacoo:k 'diagramId i) id)
         return i))
 
 (defun cacoo:api-check-diagram-list-cache-d (new-json cached-json each-func)
+  "[internal] Return a deferred object that prepares retrieving sheet data for all diagrams in parallel.
+This function is called by `cacoo:api-retrieve-diagrams'."
   (lexical-let ((each-func each-func))
     (deferred:parallel
       (loop for i in new-json
@@ -1462,6 +1466,10 @@ If the cache file not found, return nil."
               (lambda (x) (funcall each-func x) x))))))
 
 (defun cacoo:api-check-diagram-cache-d (new-json cached-json)
+  "[internal] Return a deferred object that retrieves json data of sheets from Cacoo API.
+If cached data is valid comparing with time stamps, this task
+does not access Cacoo API. This function is called by
+`cacoo:api-check-diagram-list-cache-d'."
   (let ((new-time    (date-to-time (cacoo:k 'updated new-json)))
         (cached-time (and cached-json 
                           (date-to-time 
@@ -1471,6 +1479,12 @@ If the cache file not found, return nil."
       (deferred:succeed cached-json))))
 
 (defun cacoo:api-retrieve-diagrams ()
+  "[internal] Retrieve the data of sheets and diagrams from Cacoo
+API and store the data to the local cache. If `cacoo:api-key' is
+nil, this function does nothing.  If it is offline state, this
+function uses the local cache that is retrieved previously.  See
+the local cache API functions, `cacoo:api-diagrams-local-cache-load' and
+`cacoo:api-diagrams-local-cache-save'."
   (lexical-let ((sheet-counter 0) (diagrams-counter 1)
                 (last-diagrams-json (cacoo:api-diagrams-local-cache-load))
                 diagrams-number)
@@ -1510,8 +1524,6 @@ If the cache file not found, return nil."
             (cc:dataflow-set cacoo:api-diagrams-cache-wp 'diagrams 
                              last-diagrams-json))))))))
 
-; (cacoo:api-debug-dbuffer (cacoo:api-retrieve-diagrams))
-
 ;;; Canceling asynchronous tasks
 
 (defun cacoo:api-prepare-cancel ()
@@ -1533,7 +1545,6 @@ If the cache file not found, return nil."
   (interactive)
   (setq cacoo:api-cancel-flag t))
 
-
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1541,8 +1552,8 @@ If the cache file not found, return nil."
 
 ;;; Cache Control
 
-(defvar cacoo:preview-image-cache nil "[internal]")
-(defvar cacoo:preview-image-cache-num 10 "[internal]")
+(defvar cacoo:preview-image-cache nil "[internal] The alist of image cache for preview.")
+(defvar cacoo:preview-image-cache-num 10 "[internal] The maximum number of the image cache.")
 
 (defun cacoo:preview-image-cache-get-mru (url)
   (let ((cached-pair (assoc url cacoo:preview-image-cache)))
@@ -1569,7 +1580,7 @@ If the cache file not found, return nil."
 
 ;;; Preview Buffer
 
-(defvar cacoo:anything-channel nil "[internal]")
+(defvar cacoo:anything-channel nil "[internal] The asynchronous communication channel for the anything buffer and the preview one.")
 (defconst cacoo:preview-buffer " *cacoo:preview*")
 
 (defun cacoo:preview-buffer-init (title)
@@ -1634,7 +1645,7 @@ If the cache file not found, return nil."
     (cacoo:preview-buffer-update-mode-line)))
 
 
-(defvar cacoo:preview-buffer-thread nil "[internal]")
+(defvar cacoo:preview-buffer-thread nil "[internal] Thread object for busy animation on the mode-line.")
 
 (defun cacoo:preview-buffer-stop-animation ()
   (setq cacoo:preview-buffer-thread nil))
@@ -1720,7 +1731,7 @@ If the cache file not found, return nil."
     (prog1 (with-current-buffer buf (buffer-string))
       (kill-buffer buf))))
 
-(defvar cacoo:preview-window nil "[internal]")
+(defvar cacoo:preview-window nil "[internal] Preview window object.")
 
 (defun cacoo:preview-init-preview-window ()
   (let ((win (anything-window)))
@@ -1741,7 +1752,7 @@ If the cache file not found, return nil."
   (and (window-live-p cacoo:preview-window)
        cacoo:preview-window))
 
-(defvar cacoo:preview-semaphore (cc:semaphore-create 1) "[internal]")
+(defvar cacoo:preview-semaphore (cc:semaphore-create 1) "[internal] Semaphore object for preview tasks.")
 
 (defun cacoo:preview (title url)
   (cacoo:log "AT preview %s" url)
@@ -1824,7 +1835,11 @@ If the cache file not found, return nil."
 
 ;;; Startup and Cleanup
 
-(defvar cacoo:anything-lock nil "[internal] ")
+(defvar cacoo:anything-lock nil "[internal] This variable is
+employed for the exclusive start-up of the Anything command.  If
+the Anything start-up is required, this variable is `t'. See the
+functions, `cacoo:anything-command', `cacoo:anything-startup' and
+`cacoo:anything-cleanup'.")
 
 (defun cacoo:anything-startup ()
   (cacoo:log "AT: startup")
@@ -1842,6 +1857,9 @@ If the cache file not found, return nil."
   (cacoo:log "AT: cleanup"))
 
 (defun cacoo:anything-cache-clear ()
+  "Clear all cache data around the Cacoo API. After clearing, the
+asynchronous task is started to retrieving the latest data of
+sheets and diagrams."
   (interactive)
   (cc:dataflow-clear cacoo:api-diagrams-cache-wp 'diagrams)
   (cacoo:api-diagrams-local-cache-delete)
@@ -1851,6 +1869,7 @@ If the cache file not found, return nil."
 ;;; Anything command
 
 (defun cacoo:anything-command ()
+  "Start up the anything command for diagrams of Cacoo."
   (interactive)
   (cond
    ((null cacoo:api-key)
