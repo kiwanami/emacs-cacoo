@@ -176,7 +176,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Customize variables
 
-(defvar cacoo:api-key "APIKEY" "Set your API key!")
+(defvar cacoo:api-key nil "Set your API key!")
 
 
 (defvar cacoo:img-regexp "\\[img:\\(.*\\)\\][^]\n\r]*$" "Markup regexp for searching diagrams.")
@@ -554,14 +554,19 @@ binding."
   (cc:dataflow-set cacoo:image-wp-original 
                    (substring-no-properties url) file))
 
-(defun cacoo:image-wp-clear-cache (url)
+(defun cacoo:image-wp-clear-cache (url &optional size)
   "[internal] Clear the information related to URL from the image
 workplaces and delete the corresponding cache files."
+  ;; remove the cache file for the original image.
   (cacoo:aif (cc:dataflow-get-sync cacoo:image-wp-original url)
       (progn
         (if (and (stringp it) (file-exists-p it))
             (ignore-errors (delete-file it)))
-        (cc:dataflow-clear cacoo:image-wp-original url)))
+        (cc:dataflow-clear cacoo:image-wp-original url))
+    (let ((file (cacoo:get-cache-path-from-url url)))
+      (when (cacoo:file-exists-p file)
+        (ignore-errors (delete-file file)))))
+  ;; remove the cache file for the re-sized image.
   (let ((remove-keys 
          (loop for i in (cc:dataflow-get-avalable-pairs 
                          cacoo:image-wp-resized)
@@ -575,7 +580,11 @@ workplaces and delete the corresponding cache files."
               (progn
                 (if (and (stringp it) (file-exists-p it))
                     (ignore-errors (delete-file it)))
-                (cc:dataflow-clear cacoo:image-wp-resized i))))))
+                (cc:dataflow-clear cacoo:image-wp-resized i)))))
+  (when size
+    (let ((file (cacoo:get-resize-path-from-url url size)))
+      (when (cacoo:file-exists-p file)
+        (ignore-errors (delete-file file))))))
 
 ;;; Event handling
 
@@ -1053,14 +1062,14 @@ object of structure `cacoo:$img'. Otherwise return nil."
 (defun cacoo:reload-next-diagram ()
   (cacoo:do-next-diagram 
    (lambda (data) 
-     (cacoo:image-wp-clear-cache (cacoo:$img-url data))
+     (cacoo:image-wp-clear-cache (cacoo:$img-url data) (cacoo:$img-size data))
      (cacoo:display-diagram data))))
 
 (defun cacoo:clear-cache-next-diagram ()
   (save-excursion
     (cacoo:do-next-diagram 
      (lambda (data) 
-       (cacoo:image-wp-clear-cache (cacoo:$img-url data))))))
+       (cacoo:image-wp-clear-cache (cacoo:$img-url data) (cacoo:$img-size data))))))
 
 (defun cacoo:clear-all-cache-files ()
   "Clear all files in the current cache directory."
