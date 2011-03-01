@@ -117,7 +117,7 @@
 ;; シーケンス図記述 (http://www.websequencediagrams.com/)
 ;; <<<
 
-(defvar cacoo:plugin-seq-regexp "SEQ \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+(defvar cacoo:plugin-seq-regexp "^SEQ \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
 
 (defun cacoo:plugin-seq-diagram (start end content)
   (when (string-match cacoo:plugin-seq-regexp content)
@@ -262,7 +262,7 @@
 ;; dot記述 (http://www.graphviz.org/)
 ;; <<<
 
-(defvar cacoo:plugin-dot-regexp "DOT \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+(defvar cacoo:plugin-dot-regexp "^DOT \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
 
 (defun cacoo:plugin-dot-diagram (start end content)
   (when (string-match cacoo:plugin-dot-regexp content)
@@ -279,7 +279,7 @@
 ;; SVG記述
 ;; <<<
 
-(defvar cacoo:plugin-svg-regexp "SVG \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
+(defvar cacoo:plugin-svg-regexp "^SVG \\([^ \n\r\t]+\\)\\( [0-9]+\\)?")
 
 (defun cacoo:plugin-svg (start end content)
   (when (string-match cacoo:plugin-svg-regexp content)
