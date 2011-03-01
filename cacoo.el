@@ -484,7 +484,7 @@ If something is wrong, the http-response text is passed."
               (if (string-match "200" response)
                   nil 
                 (ignore-errors (delete-file output-path))
-                (cacoo:log "  >> RESPONSE : %s " response-text)
+                (cacoo:log "  >> RESPONSE : %s" response-text)
                 response)))))
       :catch
       (lambda (err)
@@ -655,11 +655,10 @@ If something is wrong, the error message is registered."
           (deferred:$
             (cacoo:http-get-d url cache-path)
             (deferred:nextc it
-              (lambda (err)
-                (cacoo:log ">>   http response : %s" err)
+              (lambda (x)
                 (cacoo:image-wp-set-original 
-                 url (if (and (null err) (cacoo:file-exists-p cache-path)) cache-path
-                       (cons 'error err)))))))
+                 url (if (cacoo:file-exists-p cache-path) cache-path
+                       (cons 'error "File not found")))))))
         (lambda (e) 
           (cacoo:image-wp-set-original url (cons 'error e))))))))
 
@@ -711,6 +710,7 @@ error that should be caught by some errorback."
       (deferred:process "identify" "-format" "%w %h" filename)
       (deferred:nextc it
         (lambda (line)
+          (cacoo:log ">>   identify : %s" line)
           (let* ((cols (split-string line " "))
                  (width (string-to-number (car cols)))
                  (height (string-to-number (cadr cols))))
@@ -1692,16 +1692,16 @@ the local cache API functions, `cacoo:api-diagrams-local-cache-load' and
                 (cacoo:http-get-d url org-file)))
             (cacoo:preview-progress it 3 4)
             (deferred:nextc it
-              (lambda (err)
-                (cacoo:log ">>   http response : %s" err)
-                (if (and (null err) (cacoo:file-exists-p org-file)) 
+              (lambda (x)
+                (if (cacoo:file-exists-p org-file)
                     (deferred:process "identify" "-format" "%w %h" org-file)
-                  (error err))))
+                  (error "File not found"))))
             (deferred:nextc it
               (lambda (sizestr)
+                (cacoo:log ">>   identify : %s" sizestr)
                 (let* ((ww (* (window-width win) (frame-char-width)))
                        (wh (* (- (window-height win) 2) (frame-char-height)))
-                       (isize (mapcar 'string-to-int (split-string sizestr))))
+                       (isize (mapcar 'string-to-number (split-string sizestr))))
                   (if (or (< ww (car isize)) (< wh (cadr isize)))
                       (progn 
                         (cacoo:preview-progress nil 4 4)

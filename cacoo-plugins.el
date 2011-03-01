@@ -76,11 +76,7 @@
               (lambda ()
                 (deferred:$
                   (cacoo:http-get-d
-                   rurl (cacoo:get-cache-path filename))
-                  (deferred:nextc it
-                    (lambda (err)
-                      (cacoo:log ">>   http response : %s" err)
-                      (error err)))))))))))
+                   rurl (cacoo:get-cache-path filename))))))))))
 
 (defun cacoo:plugin-url-encode-string (str)
   (let ((array (string-to-vector str)))
