@@ -902,14 +902,14 @@ is called by the function `cacoo:resize-diagram'."
        (cond
         ((string-match "^file:\\/\\/\\/" url)
          (cacoo:view-original-cached-image
-          (cacoo:$img-cached-file data))
+          (cacoo:$img-url data))
          pos-end)
         ((string-match "^https?:\\/\\/" url)
          (cacoo:edit-next-diagram-command)
          pos-end)
         (t ; assuming a relative path.
          (cacoo:view-original-cached-image
-          (cacoo:$img-cached-file data))
+          (cacoo:$img-url data))
          pos-end))))))
 
 (defun cacoo:display-diagram-by-text (start end msg)
