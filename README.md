@@ -49,7 +49,9 @@ cacoo-mode 起動時に API で Cacoo に接続して、自分が作成した図
 
 ## キーバインド
 
-'cacoo-minor-mode' が On の時に以下のキーバインドが使えます。使いやすく 'cacoo-minor-mode-keymap' をカスタマイズしてみてください。
+'cacoo-minor-mode' が On の時に以下のキーバインドが使えます。また、メニューからも選ぶことが出来ます。
+
+キーバインドを変更する際は 'cacoo-minor-mode-keymap' をカスタマイズしてみてください。
 
 ### バッファ全体に対して
 - C-c , T : バッファのすべての図をテキストに戻す
@@ -61,7 +63,7 @@ cacoo-mode 起動時に API で Cacoo に接続して、自分が作成した図
 - C-c , d : 図を表示する（キャッシュがあればネットワークに接続しない）
 - C-c , r : 図を取得し直して表示する
 - C-c , e : 図の編集画面を表示する（https://cacoo.com/diagrams/xxxxx/edit）
-- C-c , v : 図の生涯画面を表示する（https://cacoo.com/diagrams/xxxxx）
+- C-c , v : 図の詳細画面を表示する（https://cacoo.com/diagrams/xxxxx）
 - C-c , V : ローカルの図を外部ビューアーで開く
 
 ### Cacooの機能に対して
