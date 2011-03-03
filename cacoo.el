@@ -132,9 +132,10 @@
 
 ;;; History:
 
-;; Revision 1.7  2010/10/27  sakurai
-;; English translation.
-;; Rewrite on concurrent.el and deferred.el.
+;; Revision 1.7  2011/03/03  sakurai
+;; English translation for docstrings.
+;; Re-build on the architecture of concurrent.el and deferred.el.
+;; Added the anything interface for Cacoo diagrams.
 ;; 
 ;; Revision 1.6  2010/07/19  sakurai
 ;; Added SVG plugin.
@@ -1910,8 +1911,6 @@ sheets and diagrams."
 
 ;; (setq cacoo:process-num 1)
 ;; (setq cacoo:process-num 4)
-;; (setq cacoo:png-background nil)
-;; (setq cacoo:png-background "white")
 
 ;; (setq cacoo:debug t)
 ;; (setq cacoo:debug nil)
