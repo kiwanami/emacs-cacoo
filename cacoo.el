@@ -3,7 +3,7 @@
 ;; Copyright (C) 2010, 2011  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 1.7
+;; Version: 2.0
 ;; Keywords: convenience, diagram
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -132,7 +132,7 @@
 
 ;;; History:
 
-;; Revision 1.7  2011/03/03  sakurai
+;; Revision 2.0  2011/03/03  sakurai
 ;; English translation for docstrings.
 ;; Re-build on the architecture of concurrent.el and deferred.el.
 ;; Added the anything interface for Cacoo diagrams.
@@ -173,7 +173,7 @@
 (require 'json)
 
 (defvar cacoo:version nil "version number")
-(setq cacoo:version "1.7")
+(setq cacoo:version "2.0")
 
 
 
