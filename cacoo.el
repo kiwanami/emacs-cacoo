@@ -199,7 +199,7 @@
 (defvar cacoo:png-background nil "If the transparent color of PNG images seems not to be good, set it non-nil.")
 (make-variable-buffer-local 'cacoo:png-background)
 
-(defvar cacoo:translation-exts '("eps" "ps" "svg") "A list of the extensions those need to translate to display in Emacs.")
+(defvar cacoo:translation-exts '("eps" "ps" "svg" "pdf" "tif") "A list of the extensions those need to translate to display in Emacs.")
 (defvar cacoo:browser-function browse-url-browser-function "The browser to open the Cacoo editor.")
 
 (defvar cacoo:http-get-file-cmd '("wget" "-q" "-S" "--no-check-certificate" "-O" output-file url))
