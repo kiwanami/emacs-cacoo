@@ -1,9 +1,11 @@
 ;;; cacoo-plugins.el --- plugins for cacoo.el
 
-;; Copyright (C) 2010, 2011  SAKURAI Masashi
+;; Copyright (C) 2010, 2011, 2012  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Keywords: 
+;; Version: 2.1.1
+;; Keywords: convenience, diagram
+;; URL: https://github.com/kiwanami/emacs-cacoo/
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
