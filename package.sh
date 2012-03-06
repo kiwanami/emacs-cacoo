@@ -1,7 +1,7 @@
 #!/bin/sh
 
 NAME=cacoo
-VER=2.1.1
+VER=2.1.2
 
 FULLNAME=$NAME-$VER
 

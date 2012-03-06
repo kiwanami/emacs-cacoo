@@ -3,7 +3,6 @@
 ;; Copyright (C) 2010, 2011, 2012  SAKURAI Masashi
 
 ;; Author: SAKURAI Masashi <m.sakurai atmark kiwanami.net>
-;; Version: 2.1.1
 ;; Keywords: convenience, diagram
 ;; URL: https://github.com/kiwanami/emacs-cacoo/
 
