@@ -389,7 +389,7 @@ larger than zero byte."
 (defun cacoo:get-image-type (file)
   "[internal] Return the image type as symbol. This function
 guesses from the filename extension."
-  (let ((type (intern (file-name-extension file))))
+  (let ((type (intern (downcase (file-name-extension file)))))
     (cond 
      ((eq type 'jpg) 'jpeg)
      (t type))))
